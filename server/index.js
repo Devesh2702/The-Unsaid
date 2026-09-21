@@ -13,36 +13,107 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-const DATA_FILE = path.join(__dirname, 'data', 'notes.json');
+// Initial seed notes for Vercel serverless environment
+const INITIAL_NOTES = [
+  {
+    id: "note-101",
+    recipient: "Sophia",
+    sender: "A Fellow Library Reader",
+    title: "To the girl in the corner desk with the vintage bookmark",
+    content: "I notice how carefully you turn the pages of old hardcover books. You have this calm atmosphere around you that brightens the entire quiet room. I hope life is treating your gentle soul with all the kindness you deserve.",
+    paperTheme: "tea-stained",
+    fontFamily: "caveat",
+    inkColor: "sepia",
+    stampDesign: "botanical-rose",
+    waxSeal: "ruby-red",
+    tag: "Love & Admiration",
+    isPrivate: false,
+    reactions: { heart: 24, hug: 18, star: 31, stamp: 12 },
+    createdAt: "2026-09-20T14:32:00.000Z",
+    postmarkLocation: "OLD TOWN TELEGRAPH • VAULT 7"
+  },
+  {
+    id: "note-102",
+    recipient: "Alex",
+    sender: "Someone who remembers",
+    title: "Thank you for the rainy Tuesday afternoon",
+    content: "You shared your coffee with me three winters ago when I had just lost my job and was sitting alone on the station bench. You probably don't even remember doing it, but that small warm cup saved my faith in human warmth.",
+    paperTheme: "classic-parchment",
+    fontFamily: "dancing-script",
+    inkColor: "midnight",
+    stampDesign: "vintage-clock",
+    waxSeal: "antique-gold",
+    tag: "Gratitude",
+    isPrivate: false,
+    reactions: { heart: 45, hug: 52, star: 29, stamp: 19 },
+    createdAt: "2026-09-19T09:15:00.000Z",
+    postmarkLocation: "SEASIDE POSTAL ROOM • DESK 4"
+  },
+  {
+    id: "note-103",
+    recipient: "Maya",
+    sender: "A silent admirer from Room 304",
+    title: "Your laugh makes Monday morning bearable",
+    content: "Whenever you walk down the hallway spilling your sketchbooks, it brings so much spontaneous joy to everyone around. Never let the world quiet your vibrant energy!",
+    paperTheme: "rose-velvet",
+    fontFamily: "patrick-hand",
+    inkColor: "crimson",
+    stampDesign: "starlight",
+    waxSeal: "ruby-red",
+    tag: "Encouragement",
+    isPrivate: false,
+    reactions: { heart: 38, hug: 14, star: 40, stamp: 15 },
+    createdAt: "2026-09-18T18:45:00.000Z",
+    postmarkLocation: "CENTRAL POSTAL STATION • BOX 19"
+  },
+  {
+    id: "note-104",
+    recipient: "Daniel",
+    sender: "An Old Friend",
+    title: "I'm sorry we let time slip away",
+    content: "We used to stay up until 3 AM listening to cassette tapes and talking about building a cabin in the woods. I saw you across the street last month. You looked tired. I wanted to wave, but froze. I hope you're happy, brother.",
+    paperTheme: "midnight-ink",
+    fontFamily: "courier-prime",
+    inkColor: "fountain-blue",
+    stampDesign: "airmail-stripes",
+    waxSeal: "royal-violet",
+    tag: "Apology",
+    isPrivate: false,
+    reactions: { heart: 67, hug: 89, star: 43, stamp: 33 },
+    createdAt: "2026-09-17T22:10:00.000Z",
+    postmarkLocation: "NIGHT SHIFT DISPATCH • ROUTE 8"
+  }
+];
+
+const DATA_FILE = path.join(process.cwd(), 'server', 'data', 'notes.json');
 
 // In-memory cache for serverless environments (e.g. Vercel)
 let inMemoryNotes = null;
 
-// Helper to read notes
+// Helper to read notes safely
 function readNotes() {
-  if (inMemoryNotes) return inMemoryNotes;
+  if (inMemoryNotes && inMemoryNotes.length > 0) return inMemoryNotes;
   try {
-    if (!fs.existsSync(DATA_FILE)) {
-      inMemoryNotes = [];
-      return inMemoryNotes;
+    if (fs.existsSync(DATA_FILE)) {
+      const data = fs.readFileSync(DATA_FILE, 'utf8');
+      inMemoryNotes = JSON.parse(data);
+      if (Array.isArray(inMemoryNotes) && inMemoryNotes.length > 0) {
+        return inMemoryNotes;
+      }
     }
-    const data = fs.readFileSync(DATA_FILE, 'utf8');
-    inMemoryNotes = JSON.parse(data);
-    return inMemoryNotes;
   } catch (err) {
-    console.error('Error reading notes.json:', err);
-    inMemoryNotes = [];
-    return inMemoryNotes;
+    console.warn('File read warning (using in-memory seed):', err.message);
   }
+  inMemoryNotes = [...INITIAL_NOTES];
+  return inMemoryNotes;
 }
 
-// Helper to write notes
+// Helper to write notes safely
 function writeNotes(notes) {
   inMemoryNotes = notes;
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(notes, null, 2), 'utf8');
   } catch (err) {
-    // Vercel serverless environment has read-only filesystem, gracefully fall back to memory
     console.warn('File write skipped (serverless read-only storage):', err.message);
   }
 }
@@ -68,15 +139,17 @@ function sanitizeNote(note) {
   return copy;
 }
 
-// GET /api/notes - search, filter, sort
-app.get('/api/notes', (req, res) => {
+// Router to handle both /api/notes AND /notes seamlessly on Vercel
+const router = express.Router();
+
+// GET /notes - search, filter, sort
+router.get('/notes', (req, res) => {
   let notes = readNotes();
   const { search, tag, sort } = req.query;
 
   const hasSearch = search && search.trim() !== '';
 
   if (hasSearch) {
-    // Search by recipient name, title, or sender
     const query = search.trim().toLowerCase();
     notes = notes.filter(n =>
       (n.recipient && n.recipient.toLowerCase().includes(query)) ||
@@ -85,16 +158,13 @@ app.get('/api/notes', (req, res) => {
       (!n.isPrivate && n.content && n.content.toLowerCase().includes(query))
     );
   } else {
-    // PUBLIC POSTAL SHELF (No search query) -> Exclude private messages from general browsing
     notes = notes.filter(n => !n.isPrivate);
   }
 
-  // Filter by tag
   if (tag && tag.trim() !== '' && tag !== 'All') {
     notes = notes.filter(n => n.tag && n.tag.toLowerCase() === tag.trim().toLowerCase());
   }
 
-  // Sort
   if (sort === 'popular') {
     notes.sort((a, b) => {
       const sumA = Object.values(a.reactions || {}).reduce((x, y) => x + y, 0);
@@ -102,15 +172,14 @@ app.get('/api/notes', (req, res) => {
       return sumB - sumA;
     });
   } else {
-    // Default: recent first
     notes.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }
 
   res.json(notes.map(sanitizeNote));
 });
 
-// GET /api/notes/random - Get random public note
-app.get('/api/notes/random', (req, res) => {
+// GET /notes/random - Get random public note
+router.get('/notes/random', (req, res) => {
   const notes = readNotes();
   const publicNotes = notes.filter(n => !n.isPrivate);
   if (publicNotes.length === 0) {
@@ -120,8 +189,8 @@ app.get('/api/notes/random', (req, res) => {
   res.json(sanitizeNote(publicNotes[randomIndex]));
 });
 
-// GET /api/notes/:id - Get single note
-app.get('/api/notes/:id', (req, res) => {
+// GET /notes/:id - Get single note
+router.get('/notes/:id', (req, res) => {
   const notes = readNotes();
   const note = notes.find(n => n.id === req.params.id);
   if (!note) {
@@ -130,8 +199,8 @@ app.get('/api/notes/:id', (req, res) => {
   res.json(sanitizeNote(note));
 });
 
-// POST /api/notes - Create new note
-app.post('/api/notes', (req, res) => {
+// POST /notes - Create new note
+router.post('/notes', (req, res) => {
   const {
     recipient,
     sender,
@@ -185,8 +254,8 @@ app.post('/api/notes', (req, res) => {
   res.status(201).json(sanitizeNote(newNote));
 });
 
-// POST /api/notes/:id/unlock - Unlock a private note with passcode
-app.post('/api/notes/:id/unlock', (req, res) => {
+// POST /notes/:id/unlock - Unlock a private note with passcode
+router.post('/notes/:id/unlock', (req, res) => {
   const { password } = req.body;
   const notes = readNotes();
   const note = notes.find(n => n.id === req.params.id);
@@ -208,9 +277,9 @@ app.post('/api/notes/:id/unlock', (req, res) => {
   }
 });
 
-// POST /api/notes/:id/react - React to note
-app.post('/api/notes/:id/react', (req, res) => {
-  const { reactionType } = req.body; // 'heart', 'hug', 'star', 'stamp'
+// POST /notes/:id/react - React to note
+router.post('/notes/:id/react', (req, res) => {
+  const { reactionType } = req.body;
   const validReactions = ['heart', 'hug', 'star', 'stamp'];
 
   if (!reactionType || !validReactions.includes(reactionType)) {
@@ -234,8 +303,8 @@ app.post('/api/notes/:id/react', (req, res) => {
   res.json(sanitizeNote(notes[noteIndex]));
 });
 
-// GET /api/stats - Global post office stats
-app.get('/api/stats', (req, res) => {
+// GET /stats - Global post office stats
+router.get('/stats', (req, res) => {
   const notes = readNotes();
   const totalNotes = notes.length;
   const uniqueRecipients = new Set(notes.map(n => n.recipient.trim().toLowerCase())).size;
@@ -250,8 +319,8 @@ app.get('/api/stats', (req, res) => {
   });
 });
 
-// GET /api/names/popular - Get top addressed recipient names (excluding private notes)
-app.get('/api/names/popular', (req, res) => {
+// GET /names/popular - Get top addressed recipient names
+router.get('/names/popular', (req, res) => {
   const notes = readNotes();
   const publicNotes = notes.filter(n => !n.isPrivate);
   const counts = {};
@@ -268,6 +337,16 @@ app.get('/api/names/popular', (req, res) => {
     .map(([name, count]) => ({ name, count }));
 
   res.json(popular);
+});
+
+// Mount router on both /api and / so Vercel function routing works 100% reliably
+app.use('/api', router);
+app.use('/', router);
+
+// Global Error Handler Middleware (Prevents Vercel 500 HTML response crashes)
+app.use((err, req, res, next) => {
+  console.error('API Error:', err);
+  res.status(500).json({ error: err.message || 'Server error occurred' });
 });
 
 // Only listen locally if not running on Vercel
