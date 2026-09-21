@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, Feather, Send, Eye, Sparkles, Check, Stamp as StampIcon, Lock, Unlock, Key, Image as ImageIcon, Mic, MicOff, Play, Pause, Trash2, Upload, Camera, Disc, Volume2 } from 'lucide-react';
+import { X, Feather, Send, Eye, Stamp as StampIcon, Lock, Unlock, Key, Image as ImageIcon, Mic, Trash2, Upload, Camera, Disc, Volume2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { playPaperSound, playStampSound } from '../utils/SoundEffects';
 import { createNote } from '../utils/api';
@@ -53,6 +53,38 @@ const TAG_OPTIONS = [
   'Nostalgia',
   'Encouragement'
 ];
+
+// Image Downscaler & Compressor to keep payload under Vercel Serverless 4.5MB limit
+function compressImageFile(file, maxWidth = 800, quality = 0.75) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(dataUrl);
+      };
+      img.onerror = () => resolve(event.target.result);
+    };
+    reader.onerror = () => resolve('');
+  });
+}
 
 export default function WriteNoteModal({ onClose, onNoteDispatched, initialRecipient = '' }) {
   const [recipient, setRecipient] = useState(initialRecipient);
@@ -130,26 +162,23 @@ export default function WriteNoteModal({ onClose, onNoteDispatched, initialRecip
     }
   };
 
-  const handleImageFileUpload = (e) => {
+  const handleImageFileUpload = async (e) => {
     const file = e.target.files[0];
     if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        alert('Image file should be under 5MB.');
-        return;
+      try {
+        const compressedBase64 = await compressImageFile(file, 800, 0.75);
+        setImageUrl(compressedBase64);
+      } catch (err) {
+        console.error('Image compression error:', err);
       }
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onloadend = () => {
-        setImageUrl(reader.result);
-      };
     }
   };
 
   const handleAudioFileUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
-      if (file.size > 8 * 1024 * 1024) {
-        alert('Audio file should be under 8MB.');
+      if (file.size > 4 * 1024 * 1024) {
+        alert('Audio file should be under 4MB for postal dispatch.');
         return;
       }
       const reader = new FileReader();
@@ -219,7 +248,7 @@ export default function WriteNoteModal({ onClose, onNoteDispatched, initialRecip
       }
       onClose();
     } catch (err) {
-      setErrorMsg(err.message || 'Failed to dispatch note. Please try again.');
+      setErrorMsg(err.message || 'Failed to dispatch note. Please check photo/voice note size.');
       setIsSubmitting(false);
     }
   };
@@ -479,7 +508,7 @@ export default function WriteNoteModal({ onClose, onNoteDispatched, initialRecip
                 {!imageUrl ? (
                   <label className="flex items-center justify-center gap-2 px-3 py-2 bg-white border border-dashed border-pink-300 rounded-xl cursor-pointer hover:bg-pink-50/50 transition-colors text-xs font-typewriter text-pink-800">
                     <Upload className="w-4 h-4 text-pink-500" />
-                    <span>Upload Image (PNG/JPG max 5MB)</span>
+                    <span>Upload Image (Auto-compressed)</span>
                     <input
                       type="file"
                       accept="image/*"
