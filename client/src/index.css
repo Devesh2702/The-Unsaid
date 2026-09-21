@@ -1,0 +1,217 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  /* Vintage Paper Line background for notebook look */
+  .bg-ruled-paper {
+    background-color: #fcf8f0;
+    background-image: repeating-linear-gradient(#fcf8f0 0px, #fcf8f0 27px, #9bbad0 28px);
+  }
+  
+  .bg-tea-stained {
+    background-color: #f7f1e3;
+    background-image: radial-gradient(#efe5ce 1px, transparent 1px), radial-gradient(#e5d3b0 1px, #f7f1e3 1px);
+    background-size: 20px 20px;
+    background-position: 0 0, 10px 10px;
+  }
+
+  .bg-dark-parchment {
+    background-color: #1a1614;
+    background-image: radial-gradient(#2d231d 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+
+  /* Postage stamp jagged perforations */
+  .stamp-edge {
+    position: relative;
+    border: 3px solid #1c130d;
+    background-size: 12px 12px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Retro postmark stamp overlay circle */
+  .postmark-seal {
+    border: 2px dashed rgba(62, 46, 30, 0.6);
+    border-radius: 50%;
+    transform: rotate(-12deg);
+  }
+
+  /* Custom Scrollbar for retro vibe */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #1c130d;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #4a3425;
+    border-radius: 4px;
+    border: 1px solid #c69214;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #6e4c35;
+  }
+}
+
+/* ==========================================================
+   10 THEME DESIGN STYLES PRESETS
+   ========================================================== */
+
+/* 1. SKEUOMORPHISM (Classic Vintage Post Office) */
+.theme-skeuomorphism {
+  --bg-primary: #1c130d;
+  --bg-card: #2b1a10;
+  --border-color: #c69214;
+  --text-accent: #e2b342;
+}
+
+/* 2. NEOMORPHISM (Soft Extruded 3D) */
+.theme-neomorphism {
+  background-color: #1e222a !important;
+  color: #e2e8f0 !important;
+}
+.theme-neomorphism .neo-card {
+  background: #1e222a;
+  box-shadow: 8px 8px 16px #15181e, -8px -8px 16px #272c36;
+  border-radius: 1.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.theme-neomorphism .neo-input {
+  background: #191c23;
+  box-shadow: inset 4px 4px 8px #111318, inset -4px -4px 8px #21252e;
+  border-radius: 1rem;
+}
+
+/* 3. GLASSMORPHISM (Frosted Glass & Auroras) */
+.theme-glassmorphism {
+  background: linear-gradient(135deg, #0f0c1b 0%, #170d2b 50%, #090915 100%) !important;
+}
+.theme-glassmorphism .glass-card {
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+/* 4. CLAYMORPHISM (3D Soft Clay & Pastel Shadows) */
+.theme-claymorphism {
+  background: linear-gradient(135deg, #1b0c26 0%, #290f38 100%) !important;
+}
+.theme-claymorphism .clay-card {
+  background: rgba(236, 72, 153, 0.12);
+  border-radius: 1.75rem;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 4px 10px rgba(255, 255, 255, 0.3), 0 15px 30px rgba(0, 0, 0, 0.4);
+}
+
+/* 5. MINIMALISM (Monochrome Clean) */
+.theme-minimalism {
+  background-color: #0a0a0a !important;
+  color: #f5f5f5 !important;
+}
+.theme-minimalism .minimal-card {
+  background-color: #121212;
+  border: 1px solid #262626;
+  border-radius: 0.5rem;
+  box-shadow: none;
+}
+
+/* 6. MAXIMALISM (Loud Pop Art & Wild Colors) */
+.theme-maximalism {
+  background: linear-gradient(45deg, #4c0519 0%, #701a75 50%, #78350f 100%) !important;
+}
+.theme-maximalism .maximal-card {
+  background: #18092c;
+  border: 3px solid #facc15;
+  box-shadow: 8px 8px 0px #ec4899;
+}
+
+/* 7. BRUTALISM (Neo-Brutalist Hard Shadows & Bold Outlines) */
+.theme-brutalism {
+  background-color: #fffbeb !important;
+  color: #000000 !important;
+}
+.theme-brutalism .brutal-card {
+  background-color: #ffffff;
+  color: #000000;
+  border: 4px solid #000000;
+  box-shadow: 6px 6px 0px #000000;
+  border-radius: 0.5rem;
+}
+.theme-brutalism .brutal-btn {
+  border: 3px solid #000000;
+  box-shadow: 4px 4px 0px #000000;
+}
+
+/* 8. LIQUID GLASS (Fluid Aqua Mesh & Gloss) */
+.theme-liquid-glass {
+  background: linear-gradient(135deg, #041d24 0%, #0b2e36 50%, #021217 100%) !important;
+}
+.theme-liquid-glass .liquid-card {
+  background: rgba(45, 212, 191, 0.08);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(45, 212, 191, 0.3);
+  box-shadow: 0 12px 32px rgba(0, 200, 200, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+}
+
+/* 9. BENTO GRID (Modular Bento Compartments) */
+.theme-bento-grid {
+  background-color: #080c14 !important;
+}
+.theme-bento-grid .bento-card {
+  background-color: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 1.25rem;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+}
+
+/* 10. SPATIAL UI (Holographic 3D Depth & VisionOS) */
+.theme-spatial-ui {
+  background: radial-gradient(circle at 50% 0%, #1e1035 0%, #07030d 70%) !important;
+}
+.theme-spatial-ui .spatial-card {
+  background: rgba(147, 51, 234, 0.1);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(192, 132, 252, 0.3);
+  box-shadow: 0 25px 50px -12px rgba(168, 85, 247, 0.25);
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.theme-spatial-ui .spatial-card:hover {
+  transform: translateY(-8px) scale(1.02);
+  box-shadow: 0 30px 60px -10px rgba(168, 85, 247, 0.4);
+}
+
+/* Animations */
+@keyframes envelopeOpen {
+  0% { transform: translateY(0) rotateX(0deg); }
+  50% { transform: translateY(-30px) rotateX(-90deg); }
+  100% { transform: translateY(0) rotateX(-180deg); }
+}
+
+@keyframes letterSlideOut {
+  0% { transform: translateY(60px) scale(0.9); opacity: 0.5; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+@keyframes waxPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.animate-envelope-open {
+  animation: envelopeOpen 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.animate-letter-slide {
+  animation: letterSlideOut 0.6s ease-out forwards;
+}
+
+.animate-wax {
+  animation: waxPulse 3s infinite ease-in-out;
+}
