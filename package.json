@@ -2,7 +2,8 @@
   "name": "online-post-office",
   "version": "1.0.0",
   "description": "Full stack retro online post office anonymous notes app",
-  "main": "server/index.js",
+  "type": "module",
+  "main": "api/index.js",
   "scripts": {
     "build": "npm run build --prefix client",
     "start": "node server/index.js"
