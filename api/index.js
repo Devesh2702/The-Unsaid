@@ -7,79 +7,10 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 // Initial seed notes array for Vercel serverless functions
-const INITIAL_NOTES = [
-  {
-    id: "note-101",
-    recipient: "Sophia",
-    sender: "A Fellow Library Reader",
-    title: "To the girl in the corner desk with the vintage bookmark",
-    content: "I notice how carefully you turn the pages of old hardcover books. You have this calm atmosphere around you that brightens the entire quiet room. I hope life is treating your gentle soul with all the kindness you deserve.",
-    paperTheme: "tea-stained",
-    fontFamily: "caveat",
-    inkColor: "sepia",
-    stampDesign: "botanical-rose",
-    waxSeal: "ruby-red",
-    tag: "Love & Admiration",
-    isPrivate: false,
-    reactions: { heart: 24, hug: 18, star: 31, stamp: 12 },
-    createdAt: "2026-09-20T14:32:00.000Z",
-    postmarkLocation: "OLD TOWN TELEGRAPH • VAULT 7"
-  },
-  {
-    id: "note-102",
-    recipient: "Alex",
-    sender: "Someone who remembers",
-    title: "Thank you for the rainy Tuesday afternoon",
-    content: "You shared your coffee with me three winters ago when I had just lost my job and was sitting alone on the station bench. You probably don't even remember doing it, but that small warm cup saved my faith in human warmth.",
-    paperTheme: "classic-parchment",
-    fontFamily: "dancing-script",
-    inkColor: "midnight",
-    stampDesign: "vintage-clock",
-    waxSeal: "antique-gold",
-    tag: "Gratitude",
-    isPrivate: false,
-    reactions: { heart: 45, hug: 52, star: 29, stamp: 19 },
-    createdAt: "2026-09-19T09:15:00.000Z",
-    postmarkLocation: "SEASIDE POSTAL ROOM • DESK 4"
-  },
-  {
-    id: "note-103",
-    recipient: "Maya",
-    sender: "A silent admirer from Room 304",
-    title: "Your laugh makes Monday morning bearable",
-    content: "Whenever you walk down the hallway spilling your sketchbooks, it brings so much spontaneous joy to everyone around. Never let the world quiet your vibrant energy!",
-    paperTheme: "rose-velvet",
-    fontFamily: "patrick-hand",
-    inkColor: "crimson",
-    stampDesign: "starlight",
-    waxSeal: "ruby-red",
-    tag: "Encouragement",
-    isPrivate: false,
-    reactions: { heart: 38, hug: 14, star: 40, stamp: 15 },
-    createdAt: "2026-09-18T18:45:00.000Z",
-    postmarkLocation: "CENTRAL POSTAL STATION • BOX 19"
-  },
-  {
-    id: "note-104",
-    recipient: "Daniel",
-    sender: "An Old Friend",
-    title: "I'm sorry we let time slip away",
-    content: "We used to stay up until 3 AM listening to cassette tapes and talking about building a cabin in the woods. I saw you across the street last month. You looked tired. I wanted to wave, but froze. I hope you're happy, brother.",
-    paperTheme: "midnight-ink",
-    fontFamily: "courier-prime",
-    inkColor: "fountain-blue",
-    stampDesign: "airmail-stripes",
-    waxSeal: "royal-violet",
-    tag: "Apology",
-    isPrivate: false,
-    reactions: { heart: 67, hug: 89, star: 43, stamp: 33 },
-    createdAt: "2026-09-17T22:10:00.000Z",
-    postmarkLocation: "NIGHT SHIFT DISPATCH • ROUTE 8"
-  }
-];
+const INITIAL_NOTES = [];
 
 // In-memory notes state for serverless execution
-let notesDatabase = [...INITIAL_NOTES];
+let notesDatabase = [];
 
 // Postmark generators
 const POSTMARKS = [
