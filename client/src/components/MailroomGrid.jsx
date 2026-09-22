@@ -35,7 +35,13 @@ export default function MailroomGrid({
         <div className="flex items-center gap-2">
           <Mail className={`w-5 h-5 ${isDarkMode ? 'text-postal-gold' : 'text-amber-800'}`} />
           <h3 className="font-cinzel text-lg font-bold">
-            {searchTerm ? `Notes Addressed to "${searchTerm}"` : selectedCategory !== 'All' ? `${selectedCategory} Mailroom` : "Public Postal Shelf"}
+            {searchTerm
+              ? `Notes Addressed to "${searchTerm}"`
+              : selectedCategory === '🔒 Sealed Letters'
+              ? 'Sealed Vault (Passcode Protected)'
+              : selectedCategory !== 'All'
+              ? `${selectedCategory} Mailroom`
+              : 'Public Postal Shelf'}
           </h3>
           <span className={`px-3 py-0.5 rounded-full border text-xs font-typewriter font-bold ${
             isDarkMode
@@ -46,11 +52,15 @@ export default function MailroomGrid({
           </span>
         </div>
 
-        {searchTerm && (
+        {searchTerm ? (
           <p className={`hidden sm:block text-xs font-typewriter ${isDarkMode ? 'text-parchment-400' : 'text-amber-900/60'}`}>
             Showing notes matching recipient name or subject
           </p>
-        )}
+        ) : selectedCategory === '🔒 Sealed Letters' ? (
+          <p className={`hidden sm:block text-xs font-typewriter ${isDarkMode ? 'text-rose-300/80' : 'text-rose-900/70'}`}>
+            Private password-protected letters • Click to unlock
+          </p>
+        ) : null}
       </div>
 
       {/* Empty State when no notes found for searched recipient */}
@@ -68,11 +78,15 @@ export default function MailroomGrid({
 
           <div className="space-y-2">
             <h4 className="font-playfair text-xl font-bold">
-              No Sealed Letters Found {searchTerm ? `for "${searchTerm}"` : ''}
+              {selectedCategory === '🔒 Sealed Letters' && !searchTerm
+                ? 'No Sealed Letters in Vault'
+                : `No Sealed Letters Found ${searchTerm ? `for "${searchTerm}"` : ''}`}
             </h4>
             <p className={`text-xs font-serif italic leading-relaxed ${isDarkMode ? 'text-parchment-300/90' : 'text-amber-900/80'}`}>
               {searchTerm
                 ? `Nobody has written an anonymous note for "${searchTerm}" yet. You can be the first to leave a heartfelt handwritten letter!`
+                : selectedCategory === '🔒 Sealed Letters'
+                ? 'There are currently no password-protected sealed letters in the vault. Write a private note to store one here!'
                 : `There are currently no notes in this category.`}
             </p>
           </div>

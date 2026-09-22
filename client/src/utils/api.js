@@ -161,8 +161,17 @@ async function parseJsonResponse(res) {
   return data;
 }
 
+// Helper to check if tag refers to the Sealed Letters vault
+export function isSealedLettersTag(t) {
+  if (!t) return false;
+  const clean = t.replace(/[🔒\s]/g, '').toLowerCase();
+  return clean === 'sealedletters' || clean === 'sealedvault';
+}
+
 export async function fetchNotes({ search = '', tag = 'All', sort = 'recent' } = {}) {
   let serverNotes = [];
+  const isVault = isSealedLettersTag(tag);
+
   try {
     const params = new URLSearchParams();
     if (search) params.append('search', search);
@@ -187,18 +196,35 @@ export async function fetchNotes({ search = '', tag = 'All', sort = 'recent' } =
   }
 
   // Apply client-side search, tag, and sort filters to guarantee consistency
-  if (search && search.trim() !== '') {
-    const q = search.trim().toLowerCase();
-    allNotes = allNotes.filter(n =>
-      (n.recipient && n.recipient.toLowerCase().includes(q)) ||
-      (n.title && n.title.toLowerCase().includes(q)) ||
-      (n.sender && n.sender.toLowerCase().includes(q)) ||
-      (!n.isPrivate && n.content && n.content.toLowerCase().includes(q))
-    );
-  }
-
-  if (tag && tag.trim() !== '' && tag !== 'All') {
-    allNotes = allNotes.filter(n => n.tag && n.tag.toLowerCase() === tag.trim().toLowerCase());
+  if (isVault) {
+    allNotes = allNotes.filter(n => Boolean(n.isPrivate));
+    if (search && search.trim() !== '') {
+      const q = search.trim().toLowerCase();
+      allNotes = allNotes.filter(n =>
+        (n.recipient && n.recipient.toLowerCase().includes(q)) ||
+        (n.title && n.title.toLowerCase().includes(q)) ||
+        (n.sender && n.sender.toLowerCase().includes(q))
+      );
+    }
+  } else {
+    if (search && search.trim() !== '') {
+      const q = search.trim().toLowerCase();
+      allNotes = allNotes.filter(n =>
+        (n.recipient && n.recipient.toLowerCase().includes(q)) ||
+        (n.title && n.title.toLowerCase().includes(q)) ||
+        (n.sender && n.sender.toLowerCase().includes(q)) ||
+        (!n.isPrivate && n.content && n.content.toLowerCase().includes(q))
+      );
+      if (tag && tag.trim() !== '' && tag !== 'All') {
+        allNotes = allNotes.filter(n => !n.isPrivate && n.tag && n.tag.toLowerCase() === tag.trim().toLowerCase());
+      }
+    } else {
+      // Default view without search: strictly public notes
+      allNotes = allNotes.filter(n => !n.isPrivate);
+      if (tag && tag.trim() !== '' && tag !== 'All') {
+        allNotes = allNotes.filter(n => n.tag && n.tag.toLowerCase() === tag.trim().toLowerCase());
+      }
+    }
   }
 
   if (sort === 'popular') {

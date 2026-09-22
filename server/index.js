@@ -86,28 +86,54 @@ router.use(async (req, res, next) => {
   next();
 });
 
+// Helper to check if tag refers to the Sealed Letters vault
+function isSealedLettersTag(t) {
+  if (!t) return false;
+  const clean = t.replace(/[🔒\s]/g, '').toLowerCase();
+  return clean === 'sealedletters' || clean === 'sealedvault';
+}
+
 // GET /notes - search, filter, sort
 router.get('/notes', async (req, res) => {
   try {
     const isDbConnected = await connectDB();
     const { search, tag, sort } = req.query;
     const hasSearch = search && search.trim() !== '';
+    const isVault = isSealedLettersTag(tag);
 
     if (isDbConnected) {
       let query = {};
 
-      if (hasSearch) {
-        const regex = new RegExp(search.trim(), 'i');
-        query.$or = [
-          { recipient: regex },
-          { title: regex },
-          { sender: regex },
-          { $and: [{ isPrivate: false }, { content: regex }] }
-        ];
-      }
-
-      if (tag && tag.trim() !== '' && tag !== 'All') {
-        query.tag = new RegExp(`^${tag.trim()}$`, 'i');
+      if (isVault) {
+        query.isPrivate = true;
+        if (hasSearch) {
+          const regex = new RegExp(search.trim(), 'i');
+          query.$or = [
+            { recipient: regex },
+            { title: regex },
+            { sender: regex }
+          ];
+        }
+      } else {
+        if (hasSearch) {
+          const regex = new RegExp(search.trim(), 'i');
+          query.$or = [
+            { recipient: regex },
+            { title: regex },
+            { sender: regex },
+            { $and: [{ isPrivate: false }, { content: regex }] }
+          ];
+          if (tag && tag.trim() !== '' && tag !== 'All') {
+            query.tag = new RegExp(`^${tag.trim()}$`, 'i');
+            query.isPrivate = false;
+          }
+        } else {
+          // Default public shelf or public categories: exclude private notes
+          query.isPrivate = false;
+          if (tag && tag.trim() !== '' && tag !== 'All') {
+            query.tag = new RegExp(`^${tag.trim()}$`, 'i');
+          }
+        }
       }
 
       let dbNotes = await Note.find(query).lean();
@@ -127,18 +153,34 @@ router.get('/notes', async (req, res) => {
 
     // Fallback if DB offline
     let notes = readNotesFallback();
-    if (hasSearch) {
-      const q = search.trim().toLowerCase();
-      notes = notes.filter(n =>
-        (n.recipient && n.recipient.toLowerCase().includes(q)) ||
-        (n.title && n.title.toLowerCase().includes(q)) ||
-        (n.sender && n.sender.toLowerCase().includes(q)) ||
-        (!n.isPrivate && n.content && n.content.toLowerCase().includes(q))
-      );
-    }
-
-    if (tag && tag.trim() !== '' && tag !== 'All') {
-      notes = notes.filter(n => n.tag && n.tag.toLowerCase() === tag.trim().toLowerCase());
+    if (isVault) {
+      notes = notes.filter(n => Boolean(n.isPrivate));
+      if (hasSearch) {
+        const q = search.trim().toLowerCase();
+        notes = notes.filter(n =>
+          (n.recipient && n.recipient.toLowerCase().includes(q)) ||
+          (n.title && n.title.toLowerCase().includes(q)) ||
+          (n.sender && n.sender.toLowerCase().includes(q))
+        );
+      }
+    } else {
+      if (hasSearch) {
+        const q = search.trim().toLowerCase();
+        notes = notes.filter(n =>
+          (n.recipient && n.recipient.toLowerCase().includes(q)) ||
+          (n.title && n.title.toLowerCase().includes(q)) ||
+          (n.sender && n.sender.toLowerCase().includes(q)) ||
+          (!n.isPrivate && n.content && n.content.toLowerCase().includes(q))
+        );
+        if (tag && tag.trim() !== '' && tag !== 'All') {
+          notes = notes.filter(n => !n.isPrivate && n.tag && n.tag.toLowerCase() === tag.trim().toLowerCase());
+        }
+      } else {
+        notes = notes.filter(n => !n.isPrivate);
+        if (tag && tag.trim() !== '' && tag !== 'All') {
+          notes = notes.filter(n => n.tag && n.tag.toLowerCase() === tag.trim().toLowerCase());
+        }
+      }
     }
 
     if (sort === 'popular') {

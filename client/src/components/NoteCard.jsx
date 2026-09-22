@@ -150,11 +150,11 @@ export default function NoteCard({ note, onOpenNote, isDarkMode }) {
 
         {/* Handwritten Teaser Content Box */}
         <div className={`mt-2 p-3 rounded-xl border shadow-inner min-h-[80px] flex items-center ${
-          note.isPrivate && (!note.isUnlocked && note.content === '🔒 Private Secret Note (Password Protected)')
+          note.isPrivate && !note.isUnlocked
             ? (isDarkMode ? 'bg-rose-950/20 border-rose-900/40 text-rose-300/90' : 'bg-rose-50/70 border-rose-200/80 text-rose-900')
             : `${fontClass} ${inkClass} ${isDarkMode ? 'bg-[#090d16]/90 border-slate-800' : 'bg-white/60 border-amber-900/15'}`
         }`}>
-          {note.isPrivate && (!note.isUnlocked && note.content === '🔒 Private Secret Note (Password Protected)') ? (
+          {note.isPrivate && !note.isUnlocked ? (
             <div className="flex items-center gap-2 font-serif text-xs sm:text-sm italic">
               <Lock className="w-4 h-4 text-rose-500 shrink-0" />
               <span>Sealed Secret Letter • Click to unlock with passcode</span>

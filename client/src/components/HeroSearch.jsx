@@ -9,7 +9,8 @@ const CATEGORIES = [
   'Gratitude',
   'Apology',
   'Nostalgia',
-  'Encouragement'
+  'Encouragement',
+  '🔒 Sealed Letters'
 ];
 
 export default function HeroSearch({
@@ -166,26 +167,42 @@ export default function HeroSearch({
               <Filter className="w-3.5 h-3.5 text-amber-500" />
               <span>Topic:</span>
             </span>
-            {CATEGORIES.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => {
-                  playPaperSound();
-                  setSelectedCategory(cat);
-                }}
-                className={`px-3 py-1 rounded-xl text-xs font-typewriter transition-all ${
-                  selectedCategory === cat
-                    ? isDarkMode
-                      ? 'bg-amber-400 text-slate-950 font-bold shadow-xs border border-amber-300'
-                      : 'bg-amber-800 text-amber-50 font-bold border border-amber-900 shadow-xs'
-                    : isDarkMode
-                      ? 'bg-[#0f172a] text-slate-300 border border-slate-700 hover:text-slate-100 hover:border-slate-500'
-                      : 'bg-white/80 text-amber-900 border border-amber-200 hover:border-amber-400'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
+            {CATEGORIES.map((cat) => {
+              const isSealed = cat === '🔒 Sealed Letters';
+              const isSelected = selectedCategory === cat;
+              let btnClass = '';
+
+              if (isSealed) {
+                btnClass = isSelected
+                  ? (isDarkMode
+                    ? 'bg-rose-500 text-white font-bold shadow-xs border border-rose-400'
+                    : 'bg-rose-700 text-white font-bold border border-rose-800 shadow-xs')
+                  : (isDarkMode
+                    ? 'bg-rose-950/40 text-rose-300 border border-rose-800/60 hover:border-rose-500 hover:text-rose-200'
+                    : 'bg-rose-50 text-rose-900 border border-rose-200 hover:border-rose-400');
+              } else {
+                btnClass = isSelected
+                  ? (isDarkMode
+                    ? 'bg-amber-400 text-slate-950 font-bold shadow-xs border border-amber-300'
+                    : 'bg-amber-800 text-amber-50 font-bold border border-amber-900 shadow-xs')
+                  : (isDarkMode
+                    ? 'bg-[#0f172a] text-slate-300 border border-slate-700 hover:text-slate-100 hover:border-slate-500'
+                    : 'bg-white/80 text-amber-900 border border-amber-200 hover:border-amber-400');
+              }
+
+              return (
+                <button
+                  key={cat}
+                  onClick={() => {
+                    playPaperSound();
+                    setSelectedCategory(cat);
+                  }}
+                  className={`px-3 py-1 rounded-xl text-xs font-typewriter transition-all ${btnClass}`}
+                >
+                  {cat}
+                </button>
+              );
+            })}
           </div>
 
           {/* Sort Selector */}

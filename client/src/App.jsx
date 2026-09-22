@@ -84,7 +84,17 @@ export default function App() {
 
   // Handler after creating a new note
   const handleNoteDispatched = (newNote) => {
-    setNotes(prev => [newNote, ...prev]);
+    if (newNote.isPrivate) {
+      if (selectedCategory === '🔒 Sealed Letters') {
+        setNotes(prev => [newNote, ...prev.filter(n => n.id !== newNote.id)]);
+      } else {
+        setSelectedCategory('🔒 Sealed Letters');
+      }
+    } else {
+      if (selectedCategory === 'All' || selectedCategory === newNote.tag) {
+        setNotes(prev => [newNote, ...prev.filter(n => n.id !== newNote.id)]);
+      }
+    }
     loadStatsAndNames();
   };
 
