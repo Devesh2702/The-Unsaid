@@ -33,12 +33,12 @@ export default function NoteReaderModal({ note, onClose, onReactionUpdate }) {
   const [reactions, setReactions] = useState(note?.reactions || { heart: 0, hug: 0, star: 0, stamp: 0 });
   const [animatingReaction, setAnimatingReaction] = useState(null);
 
-  // Private note unlock state
-  const alreadyUnlocked = !note?.isPrivate || Boolean(note?.isUnlocked) || (note?.rawContent && note?.content !== '🔒 Private Secret Note (Password Protected)');
-  const [isUnlocked, setIsUnlocked] = useState(alreadyUnlocked);
-  const [unlockedContent, setUnlockedContent] = useState(alreadyUnlocked ? (note?.rawContent || note?.content) : null);
-  const [unlockedImageUrl, setUnlockedImageUrl] = useState(alreadyUnlocked ? note?.imageUrl : null);
-  const [unlockedVoiceUrl, setUnlockedVoiceUrl] = useState(alreadyUnlocked ? note?.voiceUrl : null);
+  // Private note unlock state - strictly session-only inside the open modal
+  const isPrivate = Boolean(note?.isPrivate);
+  const [isUnlocked, setIsUnlocked] = useState(!isPrivate);
+  const [unlockedContent, setUnlockedContent] = useState(!isPrivate ? note?.content : null);
+  const [unlockedImageUrl, setUnlockedImageUrl] = useState(!isPrivate ? note?.imageUrl : null);
+  const [unlockedVoiceUrl, setUnlockedVoiceUrl] = useState(!isPrivate ? note?.voiceUrl : null);
   const [inputPasscode, setInputPasscode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [unlockError, setUnlockError] = useState('');
@@ -54,8 +54,8 @@ export default function NoteReaderModal({ note, onClose, onReactionUpdate }) {
   const inkStyle = INK_CLASSES[note.inkColor] || INK_CLASSES['sepia'];
   const paperStyle = PAPER_CLASSES[note.paperTheme] || PAPER_CLASSES['tea-stained'];
 
-  const displayImageUrl = unlockedImageUrl || note.imageUrl;
-  const displayVoiceUrl = unlockedVoiceUrl || note.voiceUrl;
+  const displayImageUrl = unlockedImageUrl || (!isPrivate ? note.imageUrl : '');
+  const displayVoiceUrl = unlockedVoiceUrl || (!isPrivate ? note.voiceUrl : '');
 
   const toggleAudio = () => {
     if (!audioRef.current) return;
@@ -76,15 +76,12 @@ export default function NoteReaderModal({ note, onClose, onReactionUpdate }) {
 
     try {
       const targetId = note.id || note._id;
-      const unlocked = await unlockNote(targetId, cleanPass);
+      const unlocked = await unlockNote(targetId, cleanPass, note);
       playWaxSealSound();
       setUnlockedContent(unlocked.content);
       setUnlockedImageUrl(unlocked.imageUrl);
       setUnlockedVoiceUrl(unlocked.voiceUrl);
       setIsUnlocked(true);
-      if (onReactionUpdate) {
-        onReactionUpdate(unlocked);
-      }
     } catch (err) {
       setUnlockError(err.message || 'Incorrect passcode. The secret letter remains sealed.');
     } finally {

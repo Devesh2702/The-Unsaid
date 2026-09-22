@@ -253,11 +253,88 @@ export async function fetchRandomNote() {
   }
 }
 
+// Lightweight pure JS cipher helpers for client-side encrypted envelopes
+function hashStr(str) {
+  let h1 = 0xdeadbeef ^ 17, h2 = 0x41c6ce57 ^ 17;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+export function encryptPayload(dataObj, password) {
+  try {
+    const jsonStr = JSON.stringify(dataObj);
+    const pass = String(password || '').trim();
+    const salt = Math.random().toString(36).substring(2, 8);
+    const verifyHash = hashStr(`${pass}:${salt}:UNSAID_SECRET`);
+
+    let cipherCodes = [];
+    for (let i = 0; i < jsonStr.length; i++) {
+      const keyChar = hashStr(`${pass}:${salt}:${Math.floor(i / 8)}`);
+      const k = keyChar.charCodeAt(i % keyChar.length);
+      cipherCodes.push(jsonStr.charCodeAt(i) ^ k);
+    }
+
+    const payload = JSON.stringify({
+      s: salt,
+      h: verifyHash,
+      d: cipherCodes
+    });
+
+    return btoa(unescape(encodeURIComponent(payload)));
+  } catch (err) {
+    console.warn('Encrypt payload error:', err);
+    return '';
+  }
+}
+
+export function decryptPayload(encryptedStr, password) {
+  const pass = String(password || '').trim();
+  const raw = decodeURIComponent(escape(atob(encryptedStr)));
+  const { s: salt, h: verifyHash, d: cipherCodes } = JSON.parse(raw);
+
+  const expectedHash = hashStr(`${pass}:${salt}:UNSAID_SECRET`);
+  if (verifyHash !== expectedHash) {
+    throw new Error('Incorrect passcode. The secret letter remains sealed.');
+  }
+
+  let plain = '';
+  for (let i = 0; i < cipherCodes.length; i++) {
+    const keyChar = hashStr(`${pass}:${salt}:${Math.floor(i / 8)}`);
+    const k = keyChar.charCodeAt(i % keyChar.length);
+    plain += String.fromCharCode(cipherCodes[i] ^ k);
+  }
+
+  return JSON.parse(plain);
+}
+
 export async function createNote(noteData) {
   let createdNote = null;
   const isPrivate = Boolean(noteData.isPrivate);
   const rawPassword = isPrivate ? String(noteData.password || '').trim() : '';
   const rawContent = String(noteData.content || '').trim();
+
+  let encryptedData = '';
+  if (isPrivate && rawPassword) {
+    encryptedData = encryptPayload({
+      content: rawContent,
+      imageUrl: noteData.imageUrl || '',
+      voiceUrl: noteData.voiceUrl || ''
+    }, rawPassword);
+  }
+
+  const payloadToSend = {
+    ...noteData,
+    isPrivate,
+    encryptedData
+  };
 
   try {
     const res = await fetch(`${BASE_URL}/notes`, {
@@ -265,7 +342,7 @@ export async function createNote(noteData) {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(noteData),
+      body: JSON.stringify(payloadToSend),
     });
     createdNote = await parseJsonResponse(res);
   } catch (err) {
@@ -284,23 +361,24 @@ export async function createNote(noteData) {
       waxSeal: noteData.waxSeal || 'ruby-red',
       tag: noteData.tag || 'Unsaid Words',
       isPrivate,
-      password: rawPassword,
-      imageUrl: noteData.imageUrl || '',
-      voiceUrl: noteData.voiceUrl || '',
+      encryptedData,
+      imageUrl: isPrivate ? '' : (noteData.imageUrl || ''),
+      voiceUrl: isPrivate ? '' : (noteData.voiceUrl || ''),
       reactions: { heart: 0, hug: 0, star: 0, stamp: 1 },
       createdAt: new Date().toISOString(),
       postmarkLocation: 'LOCAL DISPATCH • DESK 1'
     };
   }
 
-  // Always retain rawContent and password in local storage cache for seamless unlocking
+  // In persistent cache, ensure private note content is ALWAYS masked so card never exposes text
   if (createdNote) {
     const noteToSave = {
       ...createdNote,
-      rawContent,
-      password: rawPassword,
-      imageUrl: noteData.imageUrl || createdNote.imageUrl,
-      voiceUrl: noteData.voiceUrl || createdNote.voiceUrl
+      encryptedData: encryptedData || createdNote.encryptedData || '',
+      content: isPrivate ? '🔒 Private Secret Note (Password Protected)' : (createdNote.content || rawContent),
+      imageUrl: isPrivate ? '' : (createdNote.imageUrl || ''),
+      voiceUrl: isPrivate ? '' : (createdNote.voiceUrl || ''),
+      isUnlocked: false
     };
     saveLocalNote(noteToSave);
   }
@@ -308,27 +386,49 @@ export async function createNote(noteData) {
   return createdNote;
 }
 
-export async function unlockNote(noteId, password) {
+export async function unlockNote(noteId, password, noteObject = null) {
   const inputPass = String(password || '').trim();
   const localNotes = getLocalNotes();
-  const localNote = localNotes.find(n => n.id === noteId || (n._id && String(n._id) === noteId));
+  const targetId = String(noteId || noteObject?.id || noteObject?._id || '');
+  const localNote = localNotes.find(n => n && (n.id === targetId || (n._id && String(n._id) === targetId)));
+  const targetNote = noteObject || localNote;
 
-  // If localNote has saved password and matches, unlock immediately
-  if (localNote && localNote.password && String(localNote.password).trim() === inputPass) {
-    const unlocked = {
-      ...localNote,
-      content: localNote.rawContent || localNote.content,
-      isUnlocked: true
-    };
-    delete unlocked.password;
-    saveLocalNote(unlocked);
-    return unlocked;
+  // 1. Instant client-side decryption using envelope cipher
+  const cipher = targetNote?.encryptedData || localNote?.encryptedData;
+  if (cipher) {
+    try {
+      const dec = decryptPayload(cipher, inputPass);
+      if (dec && dec.content) {
+        return {
+          ...(targetNote || {}),
+          content: dec.content,
+          imageUrl: dec.imageUrl || '',
+          voiceUrl: dec.voiceUrl || '',
+          isUnlocked: true
+        };
+      }
+    } catch (cipherErr) {
+      if (cipherErr.message.includes('Incorrect passcode')) {
+        throw cipherErr;
+      }
+    }
   }
 
-  // Otherwise, attempt server unlock
+  // 2. If localNote has saved plaintext password and matches, unlock for session
+  if (localNote && localNote.password && String(localNote.password).trim() === inputPass) {
+    return {
+      ...localNote,
+      content: localNote.rawContent || localNote.content,
+      imageUrl: localNote.imageUrl || '',
+      voiceUrl: localNote.voiceUrl || '',
+      isUnlocked: true
+    };
+  }
+
+  // 3. Otherwise, attempt server unlock
   let serverError = null;
   try {
-    const res = await fetch(`${BASE_URL}/notes/${encodeURIComponent(noteId)}/unlock`, {
+    const res = await fetch(`${BASE_URL}/notes/${encodeURIComponent(targetId)}/unlock`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -337,13 +437,11 @@ export async function unlockNote(noteId, password) {
     });
     const unlockedServerNote = await parseJsonResponse(res);
     if (unlockedServerNote) {
-      const cached = {
-        ...(localNote || {}),
+      return {
+        ...(targetNote || {}),
         ...unlockedServerNote,
         isUnlocked: true
       };
-      saveLocalNote(cached);
-      return cached;
     }
   } catch (err) {
     serverError = err;
@@ -351,24 +449,16 @@ export async function unlockNote(noteId, password) {
   }
 
   // If server explicitly returned passcode failure (401), rethrow that specific message!
-  if (serverError && serverError.message && serverError.message.toLowerCase().includes('passcode')) {
+  if (serverError && serverError.message && (serverError.message.toLowerCase().includes('passcode') || serverError.message.toLowerCase().includes('password'))) {
     throw serverError;
   }
 
-  // If localNote had password but didn't match
-  if (localNote && localNote.password) {
-    if (String(localNote.password).trim() !== inputPass) {
-      throw new Error('Incorrect passcode. The secret letter remains sealed.');
-    }
+  // If targetNote exists and passcode was entered, but server returned 404/error, inform passcode failed
+  if (targetNote && inputPass) {
+    throw new Error('Incorrect passcode. The secret letter remains sealed.');
   }
 
-  // If localNote exists but has no password and server failed
-  if (localNote && serverError) {
-    throw new Error(serverError.message || 'Unable to unseal note from server. Please check your passcode.');
-  }
-
-  // If not found anywhere
-  throw new Error(serverError?.message || 'Note not found');
+  throw new Error(serverError?.message || 'Unable to unseal note. Please check passcode.');
 }
 
 export async function reactToNote(noteId, reactionType) {

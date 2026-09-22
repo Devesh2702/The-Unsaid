@@ -76,6 +76,67 @@ const POSTMARKS = [
   'SUBURBAN OUTPOST • BOX 804'
 ];
 
+// Lightweight pure JS cipher helpers
+function hashStr(str) {
+  let h1 = 0xdeadbeef ^ 17, h2 = 0x41c6ce57 ^ 17;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+function encryptPayload(dataObj, password) {
+  try {
+    const jsonStr = JSON.stringify(dataObj);
+    const pass = String(password || '').trim();
+    const salt = Math.random().toString(36).substring(2, 8);
+    const verifyHash = hashStr(`${pass}:${salt}:UNSAID_SECRET`);
+
+    let cipherCodes = [];
+    for (let i = 0; i < jsonStr.length; i++) {
+      const keyChar = hashStr(`${pass}:${salt}:${Math.floor(i / 8)}`);
+      const k = keyChar.charCodeAt(i % keyChar.length);
+      cipherCodes.push(jsonStr.charCodeAt(i) ^ k);
+    }
+
+    const payload = JSON.stringify({
+      s: salt,
+      h: verifyHash,
+      d: cipherCodes
+    });
+
+    return Buffer.from(payload).toString('base64');
+  } catch (err) {
+    return '';
+  }
+}
+
+function decryptPayload(encryptedStr, password) {
+  const pass = String(password || '').trim();
+  const raw = Buffer.from(encryptedStr, 'base64').toString('utf8');
+  const { s: salt, h: verifyHash, d: cipherCodes } = JSON.parse(raw);
+
+  const expectedHash = hashStr(`${pass}:${salt}:UNSAID_SECRET`);
+  if (verifyHash !== expectedHash) {
+    throw new Error('Incorrect passcode. The secret letter remains sealed.');
+  }
+
+  let plain = '';
+  for (let i = 0; i < cipherCodes.length; i++) {
+    const keyChar = hashStr(`${pass}:${salt}:${Math.floor(i / 8)}`);
+    const k = keyChar.charCodeAt(i % keyChar.length);
+    plain += String.fromCharCode(cipherCodes[i] ^ k);
+  }
+
+  return JSON.parse(plain);
+}
+
 function sanitizeNote(note) {
   if (!note) return null;
   const copy = typeof note.toObject === 'function' ? note.toObject() : { ...note };
@@ -89,6 +150,7 @@ function sanitizeNote(note) {
     copy.content = '🔒 Private Secret Note (Password Protected)';
     copy.imageUrl = '';
     copy.voiceUrl = '';
+    copy.encryptedData = note.encryptedData || copy.encryptedData || '';
   }
   return copy;
 }
@@ -287,6 +349,9 @@ router.post('/notes', async (req, res) => {
       return res.status(400).json({ error: 'A passcode is required for private notes.' });
     }
 
+    const cleanPassword = isPrivate ? String(password).trim() : '';
+    const cleanEncryptedData = req.body.encryptedData || (isPrivate && cleanPassword ? encryptPayload({ content: content.trim(), imageUrl: imageUrl || '', voiceUrl: voiceUrl || '' }, cleanPassword) : '');
+
     const newNoteObj = {
       id: `note-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       recipient: recipient.trim(),
@@ -300,7 +365,8 @@ router.post('/notes', async (req, res) => {
       waxSeal: waxSeal || 'ruby-red',
       tag: tag || 'Unsaid Words',
       isPrivate: Boolean(isPrivate),
-      password: isPrivate ? String(password).trim() : '',
+      password: cleanPassword,
+      encryptedData: cleanEncryptedData,
       imageUrl: imageUrl || '',
       voiceUrl: voiceUrl || '',
       reactions: { heart: 0, hug: 0, star: 0, stamp: 1 },
@@ -358,6 +424,22 @@ router.post('/notes/:id/unlock', async (req, res) => {
       return res.json(sanitizeNote(note));
     }
 
+    // 1. Try cipher decryption
+    if (note.encryptedData) {
+      try {
+        const dec = decryptPayload(note.encryptedData, inputPass);
+        const unlockedNote = sanitizeNote(note);
+        unlockedNote.content = dec.content;
+        unlockedNote.imageUrl = dec.imageUrl || '';
+        unlockedNote.voiceUrl = dec.voiceUrl || '';
+        unlockedNote.isUnlocked = true;
+        return res.json(unlockedNote);
+      } catch (decErr) {
+        return res.status(401).json({ error: 'Incorrect passcode. The secret letter remains sealed.' });
+      }
+    }
+
+    // 2. Try plaintext password match
     const notePassword = String(note.password || '').trim();
     if (notePassword && inputPass === notePassword) {
       const unlockedNote = { ...note };
@@ -367,6 +449,7 @@ router.post('/notes/:id/unlock', async (req, res) => {
       delete unlockedNote.password;
       delete unlockedNote._id;
       delete unlockedNote.__v;
+      unlockedNote.isUnlocked = true;
       return res.json(unlockedNote);
     } else {
       return res.status(401).json({ error: 'Incorrect passcode. The secret letter remains sealed.' });

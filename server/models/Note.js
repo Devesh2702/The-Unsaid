@@ -15,6 +15,7 @@ const noteSchema = new mongoose.Schema(
     tag: { type: String, default: 'Unsaid Words' },
     isPrivate: { type: Boolean, default: false },
     password: { type: String, default: '' },
+    encryptedData: { type: String, default: '' },
     imageUrl: { type: String, default: '' },
     voiceUrl: { type: String, default: '' },
     reactions: {
