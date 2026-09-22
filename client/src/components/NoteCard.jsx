@@ -1,5 +1,5 @@
 import React from 'react';
-import { Mail, Heart, ArrowUpRight } from 'lucide-react';
+import { Mail, Heart, ArrowUpRight, Lock } from 'lucide-react';
 import { playPaperSound, playWaxSealSound } from '../utils/SoundEffects';
 
 // Helper maps for font preview classes
@@ -124,6 +124,12 @@ export default function NoteCard({ note, onOpenNote, isDarkMode }) {
             }`}>
               {note.recipient}
             </span>
+            {note.isPrivate && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 shadow-2xs">
+                <Lock className="w-2.5 h-2.5" />
+                <span>PRIVATE</span>
+              </span>
+            )}
           </div>
 
           <div className={`text-[11px] font-typewriter flex items-center gap-2 ${
@@ -143,12 +149,21 @@ export default function NoteCard({ note, onOpenNote, isDarkMode }) {
         </h3>
 
         {/* Handwritten Teaser Content Box */}
-        <div className={`mt-2 p-3 rounded-xl border shadow-inner min-h-[80px] flex items-center ${fontClass} ${inkClass} ${
-          isDarkMode ? 'bg-[#090d16]/90 border-slate-800' : 'bg-white/60 border-amber-900/15'
+        <div className={`mt-2 p-3 rounded-xl border shadow-inner min-h-[80px] flex items-center ${
+          note.isPrivate && (!note.isUnlocked && note.content === '🔒 Private Secret Note (Password Protected)')
+            ? (isDarkMode ? 'bg-rose-950/20 border-rose-900/40 text-rose-300/90' : 'bg-rose-50/70 border-rose-200/80 text-rose-900')
+            : `${fontClass} ${inkClass} ${isDarkMode ? 'bg-[#090d16]/90 border-slate-800' : 'bg-white/60 border-amber-900/15'}`
         }`}>
-          <p className="line-clamp-2 leading-relaxed">
-            {note.content}
-          </p>
+          {note.isPrivate && (!note.isUnlocked && note.content === '🔒 Private Secret Note (Password Protected)') ? (
+            <div className="flex items-center gap-2 font-serif text-xs sm:text-sm italic">
+              <Lock className="w-4 h-4 text-rose-500 shrink-0" />
+              <span>Sealed Secret Letter • Click to unlock with passcode</span>
+            </div>
+          ) : (
+            <p className="line-clamp-2 leading-relaxed">
+              {note.content}
+            </p>
+          )}
         </div>
 
         {/* Bottom Metadata & Unfold Button */}

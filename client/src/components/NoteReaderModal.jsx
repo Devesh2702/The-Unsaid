@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, Heart, Sparkles, Coffee, Stamp as StampIcon, Share2, Check, ArrowLeft, Calendar, Tag, User, Lock, KeyRound, Play, Pause, Volume2, Disc, Camera } from 'lucide-react';
+import { X, Heart, Sparkles, Coffee, Stamp as StampIcon, Share2, Check, ArrowLeft, Calendar, Tag, User, Lock, KeyRound, Play, Pause, Volume2, Disc, Camera, Eye, EyeOff } from 'lucide-react';
 import { playPaperSound, playStampSound, playWaxSealSound } from '../utils/SoundEffects';
 import { reactToNote, unlockNote } from '../utils/api';
 
@@ -34,11 +34,13 @@ export default function NoteReaderModal({ note, onClose, onReactionUpdate }) {
   const [animatingReaction, setAnimatingReaction] = useState(null);
 
   // Private note unlock state
-  const [isUnlocked, setIsUnlocked] = useState(!note?.isPrivate);
-  const [unlockedContent, setUnlockedContent] = useState(note?.isPrivate ? null : note?.content);
-  const [unlockedImageUrl, setUnlockedImageUrl] = useState(note?.isPrivate ? null : note?.imageUrl);
-  const [unlockedVoiceUrl, setUnlockedVoiceUrl] = useState(note?.isPrivate ? null : note?.voiceUrl);
+  const alreadyUnlocked = !note?.isPrivate || Boolean(note?.isUnlocked) || (note?.rawContent && note?.content !== '🔒 Private Secret Note (Password Protected)');
+  const [isUnlocked, setIsUnlocked] = useState(alreadyUnlocked);
+  const [unlockedContent, setUnlockedContent] = useState(alreadyUnlocked ? (note?.rawContent || note?.content) : null);
+  const [unlockedImageUrl, setUnlockedImageUrl] = useState(alreadyUnlocked ? note?.imageUrl : null);
+  const [unlockedVoiceUrl, setUnlockedVoiceUrl] = useState(alreadyUnlocked ? note?.voiceUrl : null);
   const [inputPasscode, setInputPasscode] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [unlockError, setUnlockError] = useState('');
   const [isUnlocking, setIsUnlocking] = useState(false);
 
@@ -66,18 +68,23 @@ export default function NoteReaderModal({ note, onClose, onReactionUpdate }) {
 
   const handleUnlockNote = async (e) => {
     e.preventDefault();
-    if (!inputPasscode.trim()) return;
+    const cleanPass = inputPasscode.trim();
+    if (!cleanPass) return;
 
     setIsUnlocking(true);
     setUnlockError('');
 
     try {
-      const unlocked = await unlockNote(note.id, inputPasscode);
+      const targetId = note.id || note._id;
+      const unlocked = await unlockNote(targetId, cleanPass);
       playWaxSealSound();
       setUnlockedContent(unlocked.content);
       setUnlockedImageUrl(unlocked.imageUrl);
       setUnlockedVoiceUrl(unlocked.voiceUrl);
       setIsUnlocked(true);
+      if (onReactionUpdate) {
+        onReactionUpdate(unlocked);
+      }
     } catch (err) {
       setUnlockError(err.message || 'Incorrect passcode. The secret letter remains sealed.');
     } finally {
@@ -228,19 +235,34 @@ export default function NoteReaderModal({ note, onClose, onReactionUpdate }) {
               )}
 
               <form onSubmit={handleUnlockNote} className="space-y-3 pt-2">
-                <input
-                  type="password"
-                  required
-                  value={inputPasscode}
-                  onChange={(e) => setInputPasscode(e.target.value)}
-                  placeholder="Enter secret passcode..."
-                  className="w-full text-center px-4 py-3 bg-white/90 border border-amber-900/30 rounded-xl font-mono text-sm text-amber-950 placeholder-amber-900/40 focus:outline-none focus:border-rose-500 shadow-inner"
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={inputPasscode}
+                    onChange={(e) => {
+                      setInputPasscode(e.target.value);
+                      if (unlockError) setUnlockError('');
+                    }}
+                    placeholder="Enter secret passcode..."
+                    className="w-full text-center px-10 py-3 bg-white/90 border border-amber-900/30 rounded-xl font-mono text-sm text-amber-950 placeholder-amber-900/40 focus:outline-none focus:border-rose-500 shadow-inner"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-900/50 hover:text-amber-950 p-1.5 rounded-lg hover:bg-amber-900/10 transition-colors"
+                    title={showPassword ? "Hide passcode" : "Show passcode"}
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
 
                 <button
                   type="submit"
                   disabled={isUnlocking}
-                  className="w-full py-3 px-6 bg-gradient-to-r from-rose-500 to-purple-600 hover:from-rose-600 hover:to-purple-700 text-white font-serif font-bold rounded-xl border border-rose-300 shadow-md transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50"
+                  className="w-full py-3 px-6 bg-gradient-to-r from-rose-500 to-purple-600 hover:from-rose-600 hover:to-purple-700 text-white font-serif font-bold rounded-xl border border-rose-300 shadow-md transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50 cursor-pointer"
                 >
                   <KeyRound className="w-4 h-4" />
                   <span>{isUnlocking ? "Unsealing Vault..." : "Unlock & Read Message"}</span>

@@ -1,8 +1,11 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { connectDB, INITIAL_NOTES } from './db.js';
+import Note from './models/Note.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,16 +16,12 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Initial seed notes for standalone express server
-const INITIAL_NOTES = [];
-
-const DATA_FILE = path.join(process.cwd(), 'server', 'data', 'notes.json');
-
-// In-memory cache for serverless environments (e.g. Vercel)
+const DATA_DIR = path.join(__dirname, 'data');
+const DATA_FILE = path.join(DATA_DIR, 'notes.json');
 let inMemoryNotes = null;
 
-// Helper to read notes safely
-function readNotes() {
+// Fallback file helper if DB is disconnected
+function readNotesFallback() {
   if (inMemoryNotes && inMemoryNotes.length > 0) return inMemoryNotes;
   try {
     if (fs.existsSync(DATA_FILE)) {
@@ -33,23 +32,25 @@ function readNotes() {
       }
     }
   } catch (err) {
-    console.warn('File read warning (using in-memory seed):', err.message);
+    console.warn('Fallback file read warning:', err.message);
   }
   inMemoryNotes = [...INITIAL_NOTES];
   return inMemoryNotes;
 }
 
-// Helper to write notes safely
-function writeNotes(notes) {
+function writeNotesFallback(notes) {
   inMemoryNotes = notes;
   try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
     fs.writeFileSync(DATA_FILE, JSON.stringify(notes, null, 2), 'utf8');
   } catch (err) {
-    console.warn('File write skipped (serverless read-only storage):', err.message);
+    console.warn('Fallback file write skipped:', err.message);
   }
 }
 
-// Postmark generators
+// Postmark locations generator
 const POSTMARKS = [
   'MIDNIGHT TELEGRAPH • DESK 4',
   'OLD TOWN POSTAL VAULT • #7',
@@ -62,228 +63,425 @@ const POSTMARKS = [
 // Helper to sanitize note (hide password and mask private content for list view)
 function sanitizeNote(note) {
   if (!note) return null;
-  const copy = { ...note };
+  const copy = typeof note.toObject === 'function' ? note.toObject() : { ...note };
+  if (!copy.id && copy._id) {
+    copy.id = String(copy._id);
+  }
   delete copy.password;
+  delete copy._id;
+  delete copy.__v;
   if (copy.isPrivate) {
     copy.content = '🔒 Private Secret Note (Password Protected)';
+    copy.imageUrl = '';
+    copy.voiceUrl = '';
   }
   return copy;
 }
 
-// Router to handle both /api/notes AND /notes seamlessly on Vercel
 const router = express.Router();
 
+// Middleware to ensure DB connection attempt per request
+router.use(async (req, res, next) => {
+  await connectDB();
+  next();
+});
+
 // GET /notes - search, filter, sort
-router.get('/notes', (req, res) => {
-  let notes = readNotes();
-  const { search, tag, sort } = req.query;
+router.get('/notes', async (req, res) => {
+  try {
+    const isDbConnected = await connectDB();
+    const { search, tag, sort } = req.query;
+    const hasSearch = search && search.trim() !== '';
 
-  const hasSearch = search && search.trim() !== '';
+    if (isDbConnected) {
+      let query = {};
 
-  if (hasSearch) {
-    const query = search.trim().toLowerCase();
-    notes = notes.filter(n =>
-      (n.recipient && n.recipient.toLowerCase().includes(query)) ||
-      (n.title && n.title.toLowerCase().includes(query)) ||
-      (n.sender && n.sender.toLowerCase().includes(query)) ||
-      (!n.isPrivate && n.content && n.content.toLowerCase().includes(query))
-    );
-  } else {
-    notes = notes.filter(n => !n.isPrivate);
+      if (hasSearch) {
+        const regex = new RegExp(search.trim(), 'i');
+        query.$or = [
+          { recipient: regex },
+          { title: regex },
+          { sender: regex },
+          { $and: [{ isPrivate: false }, { content: regex }] }
+        ];
+      }
+
+      if (tag && tag.trim() !== '' && tag !== 'All') {
+        query.tag = new RegExp(`^${tag.trim()}$`, 'i');
+      }
+
+      let dbNotes = await Note.find(query).lean();
+
+      if (sort === 'popular') {
+        dbNotes.sort((a, b) => {
+          const sumA = Object.values(a.reactions || {}).reduce((x, y) => x + y, 0);
+          const sumB = Object.values(b.reactions || {}).reduce((x, y) => x + y, 0);
+          return sumB - sumA;
+        });
+      } else {
+        dbNotes.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      }
+
+      return res.json(dbNotes.map(sanitizeNote));
+    }
+
+    // Fallback if DB offline
+    let notes = readNotesFallback();
+    if (hasSearch) {
+      const q = search.trim().toLowerCase();
+      notes = notes.filter(n =>
+        (n.recipient && n.recipient.toLowerCase().includes(q)) ||
+        (n.title && n.title.toLowerCase().includes(q)) ||
+        (n.sender && n.sender.toLowerCase().includes(q)) ||
+        (!n.isPrivate && n.content && n.content.toLowerCase().includes(q))
+      );
+    }
+
+    if (tag && tag.trim() !== '' && tag !== 'All') {
+      notes = notes.filter(n => n.tag && n.tag.toLowerCase() === tag.trim().toLowerCase());
+    }
+
+    if (sort === 'popular') {
+      notes.sort((a, b) => {
+        const sumA = Object.values(a.reactions || {}).reduce((x, y) => x + y, 0);
+        const sumB = Object.values(b.reactions || {}).reduce((x, y) => x + y, 0);
+        return sumB - sumA;
+      });
+    } else {
+      notes.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }
+
+    res.json(notes.map(sanitizeNote));
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Error fetching notes' });
   }
-
-  if (tag && tag.trim() !== '' && tag !== 'All') {
-    notes = notes.filter(n => n.tag && n.tag.toLowerCase() === tag.trim().toLowerCase());
-  }
-
-  if (sort === 'popular') {
-    notes.sort((a, b) => {
-      const sumA = Object.values(a.reactions || {}).reduce((x, y) => x + y, 0);
-      const sumB = Object.values(b.reactions || {}).reduce((x, y) => x + y, 0);
-      return sumB - sumA;
-    });
-  } else {
-    notes.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  }
-
-  res.json(notes.map(sanitizeNote));
 });
 
 // GET /notes/random - Get random public note
-router.get('/notes/random', (req, res) => {
-  const notes = readNotes();
-  const publicNotes = notes.filter(n => !n.isPrivate);
-  if (publicNotes.length === 0) {
-    return res.status(404).json({ error: 'No public notes found' });
+router.get('/notes/random', async (req, res) => {
+  try {
+    const isDbConnected = await connectDB();
+    if (isDbConnected) {
+      const count = await Note.countDocuments({ isPrivate: false });
+      if (count === 0) {
+        return res.status(404).json({ error: 'No public notes found' });
+      }
+      const random = Math.floor(Math.random() * count);
+      const randomNote = await Note.findOne({ isPrivate: false }).skip(random).lean();
+      return res.json(sanitizeNote(randomNote));
+    }
+
+    const notes = readNotesFallback();
+    const publicNotes = notes.filter(n => !n.isPrivate);
+    if (publicNotes.length === 0) {
+      return res.status(404).json({ error: 'No public notes found' });
+    }
+    const randomIndex = Math.floor(Math.random() * publicNotes.length);
+    res.json(sanitizeNote(publicNotes[randomIndex]));
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Error fetching random note' });
   }
-  const randomIndex = Math.floor(Math.random() * publicNotes.length);
-  res.json(sanitizeNote(publicNotes[randomIndex]));
 });
 
 // GET /notes/:id - Get single note
-router.get('/notes/:id', (req, res) => {
-  const notes = readNotes();
-  const note = notes.find(n => n.id === req.params.id);
-  if (!note) {
-    return res.status(404).json({ error: 'Note not found' });
+router.get('/notes/:id', async (req, res) => {
+  try {
+    const isDbConnected = await connectDB();
+    let note = null;
+
+    if (isDbConnected) {
+      note = await Note.findOne({ id: req.params.id }).lean();
+      if (!note && mongoose.Types.ObjectId.isValid(req.params.id)) {
+        note = await Note.findById(req.params.id).lean();
+      }
+    }
+
+    if (!note) {
+      const notes = readNotesFallback();
+      note = notes.find(n => n.id === req.params.id || (n._id && String(n._id) === req.params.id));
+    }
+
+    if (!note) {
+      return res.status(404).json({ error: 'Note not found' });
+    }
+    return res.json(sanitizeNote(note));
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Error fetching note' });
   }
-  res.json(sanitizeNote(note));
 });
 
 // POST /notes - Create new note
-router.post('/notes', (req, res) => {
-  const {
-    recipient,
-    sender,
-    title,
-    content,
-    paperTheme,
-    fontFamily,
-    inkColor,
-    stampDesign,
-    waxSeal,
-    tag,
-    isPrivate,
-    password,
-    imageUrl,
-    voiceUrl
-  } = req.body;
+router.post('/notes', async (req, res) => {
+  try {
+    const {
+      recipient,
+      sender,
+      title,
+      content,
+      paperTheme,
+      fontFamily,
+      inkColor,
+      stampDesign,
+      waxSeal,
+      tag,
+      isPrivate,
+      password,
+      imageUrl,
+      voiceUrl
+    } = req.body || {};
 
-  if (!recipient || !recipient.trim() || !content || !content.trim()) {
-    return res.status(400).json({ error: 'Recipient and Content are required fields.' });
+    if (!recipient || !recipient.trim() || !content || !content.trim()) {
+      return res.status(400).json({ error: 'Recipient and Content are required fields.' });
+    }
+
+    if (isPrivate && (!password || !password.trim())) {
+      return res.status(400).json({ error: 'A passcode is required to make a note private.' });
+    }
+
+    const newNoteObj = {
+      id: `note-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      recipient: recipient.trim(),
+      sender: (sender && sender.trim()) || 'Anonymous',
+      title: (title && title.trim()) || `A note for ${recipient.trim()}`,
+      content: content.trim(),
+      paperTheme: paperTheme || 'tea-stained',
+      fontFamily: fontFamily || 'caveat',
+      inkColor: inkColor || 'sepia',
+      stampDesign: stampDesign || 'botanical-rose',
+      waxSeal: waxSeal || 'ruby-red',
+      tag: tag || 'Unsaid Words',
+      isPrivate: Boolean(isPrivate),
+      password: isPrivate ? String(password).trim() : '',
+      imageUrl: imageUrl || '',
+      voiceUrl: voiceUrl || '',
+      reactions: { heart: 0, hug: 0, star: 0, stamp: 1 },
+      createdAt: new Date(),
+      postmarkLocation: POSTMARKS[Math.floor(Math.random() * POSTMARKS.length)]
+    };
+
+    const isDbConnected = await connectDB();
+    if (isDbConnected) {
+      try {
+        await Note.create(newNoteObj);
+      } catch (dbErr) {
+        console.warn('DB note create error, saving to fallback:', dbErr.message);
+      }
+    }
+
+    // Always update fallback as well so local memory and notes.json stay in sync
+    const notes = readNotesFallback();
+    const existingIdx = notes.findIndex(n => n.id === newNoteObj.id);
+    if (existingIdx !== -1) {
+      notes[existingIdx] = newNoteObj;
+    } else {
+      notes.unshift(newNoteObj);
+    }
+    writeNotesFallback(notes);
+
+    res.status(201).json(sanitizeNote(newNoteObj));
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Error creating note' });
   }
-
-  if (isPrivate && (!password || !password.trim())) {
-    return res.status(400).json({ error: 'A passcode is required to make a note private.' });
-  }
-
-  const notes = readNotes();
-  const newNote = {
-    id: `note-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    recipient: recipient.trim(),
-    sender: (sender && sender.trim()) || 'Anonymous',
-    title: (title && title.trim()) || `A note for ${recipient.trim()}`,
-    content: content.trim(),
-    paperTheme: paperTheme || 'tea-stained',
-    fontFamily: fontFamily || 'caveat',
-    inkColor: inkColor || 'sepia',
-    stampDesign: stampDesign || 'botanical-rose',
-    waxSeal: waxSeal || 'ruby-red',
-    tag: tag || 'Unsaid Words',
-    isPrivate: Boolean(isPrivate),
-    password: isPrivate ? String(password).trim() : '',
-    imageUrl: imageUrl || '',
-    voiceUrl: voiceUrl || '',
-    reactions: { heart: 0, hug: 0, star: 0, stamp: 1 },
-    createdAt: new Date().toISOString(),
-    postmarkLocation: POSTMARKS[Math.floor(Math.random() * POSTMARKS.length)]
-  };
-
-  notes.unshift(newNote);
-  writeNotes(notes);
-
-  res.status(201).json(sanitizeNote(newNote));
 });
 
-// POST /notes/:id/unlock - Unlock a private note with passcode
-router.post('/notes/:id/unlock', (req, res) => {
-  const { password } = req.body;
-  const notes = readNotes();
-  const note = notes.find(n => n.id === req.params.id);
+// POST /notes/:id/unlock - Unlock private note
+router.post('/notes/:id/unlock', async (req, res) => {
+  try {
+    const { password } = req.body || {};
+    const inputPass = String(password || '').trim();
+    const isDbConnected = await connectDB();
+    let note = null;
 
-  if (!note) {
-    return res.status(404).json({ error: 'Note not found' });
-  }
+    if (isDbConnected) {
+      note = await Note.findOne({ id: req.params.id }).lean();
+      if (!note && mongoose.Types.ObjectId.isValid(req.params.id)) {
+        note = await Note.findById(req.params.id).lean();
+      }
+    }
 
-  if (!note.isPrivate) {
-    return res.json(sanitizeNote(note));
-  }
+    if (!note) {
+      const notes = readNotesFallback();
+      note = notes.find(n => n.id === req.params.id || (n._id && String(n._id) === req.params.id));
+    }
 
-  if (note.password && String(password || '').trim() === note.password) {
-    const unlockedNote = { ...note };
-    delete unlockedNote.password;
-    return res.json(unlockedNote);
-  } else {
-    return res.status(401).json({ error: 'Incorrect passcode. The secret letter remains sealed.' });
+    if (!note) {
+      return res.status(404).json({ error: 'Note not found' });
+    }
+
+    if (!note.isPrivate) {
+      return res.json(sanitizeNote(note));
+    }
+
+    const notePassword = String(note.password || '').trim();
+    if (notePassword && inputPass === notePassword) {
+      const unlockedNote = { ...note };
+      if (!unlockedNote.id && unlockedNote._id) {
+        unlockedNote.id = String(unlockedNote._id);
+      }
+      delete unlockedNote.password;
+      delete unlockedNote._id;
+      delete unlockedNote.__v;
+      return res.json(unlockedNote);
+    } else {
+      return res.status(401).json({ error: 'Incorrect passcode. The secret letter remains sealed.' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Error unlocking note' });
   }
 });
 
 // POST /notes/:id/react - React to note
-router.post('/notes/:id/react', (req, res) => {
-  const { reactionType } = req.body;
-  const validReactions = ['heart', 'hug', 'star', 'stamp'];
+router.post('/notes/:id/react', async (req, res) => {
+  try {
+    const { reactionType } = req.body || {};
+    const validReactions = ['heart', 'hug', 'star', 'stamp'];
 
-  if (!reactionType || !validReactions.includes(reactionType)) {
-    return res.status(400).json({ error: 'Invalid reaction type' });
+    if (!reactionType || !validReactions.includes(reactionType)) {
+      return res.status(400).json({ error: 'Invalid reaction type' });
+    }
+
+    const isDbConnected = await connectDB();
+    let updatedNote = null;
+
+    if (isDbConnected) {
+      updatedNote = await Note.findOneAndUpdate(
+        { id: req.params.id },
+        { $inc: { [`reactions.${reactionType}`]: 1 } },
+        { new: true }
+      ).lean();
+      if (!updatedNote && mongoose.Types.ObjectId.isValid(req.params.id)) {
+        updatedNote = await Note.findByIdAndUpdate(
+          req.params.id,
+          { $inc: { [`reactions.${reactionType}`]: 1 } },
+          { new: true }
+        ).lean();
+      }
+    }
+
+    // Always update fallback
+    const notes = readNotesFallback();
+    const idx = notes.findIndex(n => n.id === req.params.id || (n._id && String(n._id) === req.params.id));
+    if (idx !== -1) {
+      if (!notes[idx].reactions) {
+        notes[idx].reactions = { heart: 0, hug: 0, star: 0, stamp: 0 };
+      }
+      notes[idx].reactions[reactionType] = (notes[idx].reactions[reactionType] || 0) + 1;
+      writeNotesFallback(notes);
+      if (!updatedNote) {
+        updatedNote = notes[idx];
+      }
+    }
+
+    if (!updatedNote) {
+      return res.status(404).json({ error: 'Note not found' });
+    }
+
+    return res.json(sanitizeNote(updatedNote));
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Error updating reaction' });
   }
-
-  const notes = readNotes();
-  const noteIndex = notes.findIndex(n => n.id === req.params.id);
-
-  if (noteIndex === -1) {
-    return res.status(404).json({ error: 'Note not found' });
-  }
-
-  if (!notes[noteIndex].reactions) {
-    notes[noteIndex].reactions = { heart: 0, hug: 0, star: 0, stamp: 0 };
-  }
-
-  notes[noteIndex].reactions[reactionType] = (notes[noteIndex].reactions[reactionType] || 0) + 1;
-  writeNotes(notes);
-
-  res.json(sanitizeNote(notes[noteIndex]));
 });
 
 // GET /stats - Global post office stats
-router.get('/stats', (req, res) => {
-  const notes = readNotes();
-  const totalNotes = notes.length;
-  const uniqueRecipients = new Set(notes.map(n => n.recipient.trim().toLowerCase())).size;
-  const totalReactions = notes.reduce((acc, note) => {
-    return acc + Object.values(note.reactions || {}).reduce((x, y) => x + y, 0);
-  }, 0);
+router.get('/stats', async (req, res) => {
+  try {
+    const isDbConnected = await connectDB();
+    if (isDbConnected) {
+      const totalNotes = await Note.countDocuments();
+      const distinctRecipients = await Note.distinct('recipient');
+      const uniqueRecipients = distinctRecipients.length;
 
-  res.json({
-    totalNotes,
-    uniqueRecipients,
-    totalReactions
-  });
-});
+      const reactionAggregation = await Note.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalHearts: { $sum: '$reactions.heart' },
+            totalHugs: { $sum: '$reactions.hug' },
+            totalStars: { $sum: '$reactions.star' },
+            totalStamps: { $sum: '$reactions.stamp' }
+          }
+        }
+      ]);
 
-// GET /names/popular - Get top addressed recipient names
-router.get('/names/popular', (req, res) => {
-  const notes = readNotes();
-  const publicNotes = notes.filter(n => !n.isPrivate);
-  const counts = {};
-  publicNotes.forEach(n => {
-    const name = n.recipient.trim();
-    if (name) {
-      counts[name] = (counts[name] || 0) + 1;
+      let totalReactions = 0;
+      if (reactionAggregation.length > 0) {
+        const { totalHearts, totalHugs, totalStars, totalStamps } = reactionAggregation[0];
+        totalReactions = (totalHearts || 0) + (totalHugs || 0) + (totalStars || 0) + (totalStamps || 0);
+      }
+
+      return res.json({
+        totalNotes,
+        uniqueRecipients,
+        totalReactions
+      });
     }
-  });
 
-  const popular = Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(([name, count]) => ({ name, count }));
+    const notes = readNotesFallback();
+    const totalNotes = notes.length;
+    const uniqueRecipients = new Set(notes.map(n => n.recipient.trim().toLowerCase())).size;
+    const totalReactions = notes.reduce((acc, note) => {
+      return acc + Object.values(note.reactions || {}).reduce((x, y) => x + y, 0);
+    }, 0);
 
-  res.json(popular);
+    res.json({
+      totalNotes,
+      uniqueRecipients,
+      totalReactions
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Error fetching stats' });
+  }
 });
 
-// Mount router on both /api and / so Vercel function routing works 100% reliably
+// GET /names/popular - Top addressed recipient names
+router.get('/names/popular', async (req, res) => {
+  try {
+    const isDbConnected = await connectDB();
+    if (isDbConnected) {
+      const popular = await Note.aggregate([
+        { $match: { isPrivate: false } },
+        { $group: { _id: '$recipient', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+        { $project: { _id: 0, name: '$_id', count: 1 } }
+      ]);
+      return res.json(popular);
+    }
+
+    const notes = readNotesFallback();
+    const publicNotes = notes.filter(n => !n.isPrivate);
+    const counts = {};
+    publicNotes.forEach(n => {
+      const name = n.recipient.trim();
+      if (name) {
+        counts[name] = (counts[name] || 0) + 1;
+      }
+    });
+
+    const popular = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([name, count]) => ({ name, count }));
+
+    res.json(popular);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Error fetching popular names' });
+  }
+});
+
+// Mount router on both /api and /
 app.use('/api', router);
 app.use('/', router);
 
-// Global Error Handler Middleware (Prevents Vercel 500 HTML response crashes)
+// Error handling middleware
 app.use((err, req, res, next) => {
   console.error('API Error:', err);
   res.status(500).json({ error: err.message || 'Server error occurred' });
 });
 
-// Only listen locally if not running on Vercel
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
-    console.log(`📬 The Unsaid Backend running on port ${PORT}`);
+    console.log(`📬 Online Post Office Backend running on port ${PORT}`);
   });
 }
 
