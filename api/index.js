@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
+import mongoose from 'mongoose';
 import { connectDB, INITIAL_NOTES } from '../server/db.js';
 import Note from '../server/models/Note.js';
 
