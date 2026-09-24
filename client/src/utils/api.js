@@ -169,7 +169,7 @@ export function isSealedLettersTag(t) {
 }
 
 export async function fetchNotes({ search = '', tag = 'All', sort = 'recent' } = {}) {
-  let serverNotes = [];
+  let serverNotes = null;
   const isVault = isSealedLettersTag(tag);
 
   try {
@@ -180,22 +180,72 @@ export async function fetchNotes({ search = '', tag = 'All', sort = 'recent' } =
 
     const res = await fetch(`${BASE_URL}/notes?${params.toString()}`);
     serverNotes = await parseJsonResponse(res);
-    if (Array.isArray(serverNotes) && serverNotes.length > 0) {
+    if (Array.isArray(serverNotes)) {
       syncLocalNotes(serverNotes);
     }
   } catch (err) {
     console.warn('fetchNotes API request failed, using cached local notes:', err);
   }
 
-  // Retrieve merged list (server + user created local notes)
-  let allNotes = getLocalNotes();
+  // PRIMARY: if server responded successfully, use its data directly.
+  // The server already applies the correct search/tag/sort filters, so trust it.
+  // We only merge in locally-created offline notes that aren't on the server yet.
+  if (Array.isArray(serverNotes)) {
+    const serverIds = new Set(serverNotes.map(n => n.id));
+    const localNotes = getLocalNotes();
 
-  // If local notes empty, use whatever server returned
-  if (allNotes.length === 0 && Array.isArray(serverNotes)) {
-    allNotes = serverNotes;
+    // Find notes that were created offline (not yet on the server) and are relevant to the current filter
+    const offlineOnly = localNotes.filter(n => n && n.id && !serverIds.has(n.id));
+
+    let offlineFiltered = offlineOnly;
+    if (isVault) {
+      offlineFiltered = offlineOnly.filter(n => Boolean(n.isPrivate));
+      if (search && search.trim() !== '') {
+        const q = search.trim().toLowerCase();
+        offlineFiltered = offlineFiltered.filter(n =>
+          (n.recipient && n.recipient.toLowerCase().includes(q)) ||
+          (n.title && n.title.toLowerCase().includes(q)) ||
+          (n.sender && n.sender.toLowerCase().includes(q))
+        );
+      }
+    } else {
+      if (search && search.trim() !== '') {
+        const q = search.trim().toLowerCase();
+        offlineFiltered = offlineFiltered.filter(n =>
+          (n.recipient && n.recipient.toLowerCase().includes(q)) ||
+          (n.title && n.title.toLowerCase().includes(q)) ||
+          (n.sender && n.sender.toLowerCase().includes(q)) ||
+          (!n.isPrivate && n.content && n.content.toLowerCase().includes(q))
+        );
+        if (tag && tag.trim() !== '' && tag !== 'All') {
+          offlineFiltered = offlineFiltered.filter(n => !n.isPrivate && n.tag && n.tag.toLowerCase() === tag.trim().toLowerCase());
+        }
+      } else {
+        offlineFiltered = offlineFiltered.filter(n => !n.isPrivate);
+        if (tag && tag.trim() !== '' && tag !== 'All') {
+          offlineFiltered = offlineFiltered.filter(n => n.tag && n.tag.toLowerCase() === tag.trim().toLowerCase());
+        }
+      }
+    }
+
+    const allNotes = [...serverNotes, ...offlineFiltered];
+
+    if (sort === 'popular') {
+      allNotes.sort((a, b) => {
+        const sumA = Object.values(a.reactions || {}).reduce((x, y) => x + y, 0);
+        const sumB = Object.values(b.reactions || {}).reduce((x, y) => x + y, 0);
+        return sumB - sumA;
+      });
+    } else {
+      allNotes.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    }
+
+    return allNotes;
   }
 
-  // Apply client-side search, tag, and sort filters to guarantee consistency
+  // FALLBACK: server unreachable — use localStorage cache (includes seed notes)
+  let allNotes = getLocalNotes();
+
   if (isVault) {
     allNotes = allNotes.filter(n => Boolean(n.isPrivate));
     if (search && search.trim() !== '') {
@@ -219,7 +269,6 @@ export async function fetchNotes({ search = '', tag = 'All', sort = 'recent' } =
         allNotes = allNotes.filter(n => !n.isPrivate && n.tag && n.tag.toLowerCase() === tag.trim().toLowerCase());
       }
     } else {
-      // Default view without search: strictly public notes
       allNotes = allNotes.filter(n => !n.isPrivate);
       if (tag && tag.trim() !== '' && tag !== 'All') {
         allNotes = allNotes.filter(n => n.tag && n.tag.toLowerCase() === tag.trim().toLowerCase());

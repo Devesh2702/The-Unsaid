@@ -37,7 +37,15 @@ export default function NoteReaderModal({ note, onClose, onReactionUpdate }) {
   const isPrivate = Boolean(note?.isPrivate);
   const [isUnlocked, setIsUnlocked] = useState(!isPrivate);
   const [unlockedContent, setUnlockedContent] = useState(!isPrivate ? note?.content : null);
-  const [unlockedImageUrl, setUnlockedImageUrl] = useState(!isPrivate ? note?.imageUrl : null);
+  // Helper: normalise note images — supports old imageUrl string + new imageUrls array
+  const getNoteImages = (n) => {
+    if (!n) return [];
+    if (Array.isArray(n.imageUrls) && n.imageUrls.length > 0) return n.imageUrls;
+    if (n.imageUrl) return [n.imageUrl];
+    return [];
+  };
+
+  const [unlockedImageUrls, setUnlockedImageUrls] = useState(!isPrivate ? getNoteImages(note) : []);
   const [unlockedVoiceUrl, setUnlockedVoiceUrl] = useState(!isPrivate ? note?.voiceUrl : null);
   const [inputPasscode, setInputPasscode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -54,7 +62,9 @@ export default function NoteReaderModal({ note, onClose, onReactionUpdate }) {
   const inkStyle = INK_CLASSES[note.inkColor] || INK_CLASSES['sepia'];
   const paperStyle = PAPER_CLASSES[note.paperTheme] || PAPER_CLASSES['tea-stained'];
 
-  const displayImageUrl = unlockedImageUrl || (!isPrivate ? note.imageUrl : '');
+  const displayImageUrls = unlockedImageUrls.length > 0
+    ? unlockedImageUrls
+    : (!isPrivate ? getNoteImages(note) : []);
   const displayVoiceUrl = unlockedVoiceUrl || (!isPrivate ? note.voiceUrl : '');
 
   const toggleAudio = () => {
@@ -79,7 +89,11 @@ export default function NoteReaderModal({ note, onClose, onReactionUpdate }) {
       const unlocked = await unlockNote(targetId, cleanPass, note);
       playWaxSealSound();
       setUnlockedContent(unlocked.content);
-      setUnlockedImageUrl(unlocked.imageUrl);
+      // Support new imageUrls array and legacy imageUrl string from old encrypted notes
+      const imgs = Array.isArray(unlocked.imageUrls) && unlocked.imageUrls.length
+        ? unlocked.imageUrls
+        : (unlocked.imageUrl ? [unlocked.imageUrl] : []);
+      setUnlockedImageUrls(imgs);
       setUnlockedVoiceUrl(unlocked.voiceUrl);
       setIsUnlocked(true);
     } catch (err) {
@@ -268,21 +282,31 @@ export default function NoteReaderModal({ note, onClose, onReactionUpdate }) {
             </div>
           ) : (
             <div className="space-y-6">
-              {/* Polaroid Photo Frame if photo attached */}
-              {displayImageUrl && (
-                <div className="my-6 flex justify-center">
-                  <div className="bg-white p-3 sm:p-4 pb-6 sm:pb-8 rounded-sm shadow-xl border border-slate-200 transform -rotate-1 hover:rotate-0 transition-transform duration-300 max-w-sm w-full">
-                    <div className="relative overflow-hidden rounded-xs bg-slate-900 border border-slate-100 aspect-4/3 flex items-center justify-center">
-                      <img
-                        src={displayImageUrl}
-                        alt="Attached memory photo"
-                        className="w-full h-full object-cover"
-                      />
+              {/* Polaroid Photo Gallery */}
+              {displayImageUrls.length > 0 && (
+                <div className={`my-6 ${
+                  displayImageUrls.length === 1
+                    ? 'flex justify-center'
+                    : 'grid grid-cols-2 sm:grid-cols-3 gap-4 justify-items-center'
+                }`}>
+                  {displayImageUrls.map((url, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-white p-3 sm:p-4 pb-6 sm:pb-8 rounded-sm shadow-xl border border-slate-200 hover:rotate-0 transition-transform duration-300 max-w-[200px] w-full"
+                      style={{ transform: `rotate(${(idx % 2 === 0 ? -1 : 1) * (1 + (idx % 3) * 0.4)}deg)` }}
+                    >
+                      <div className="relative overflow-hidden rounded-xs bg-slate-900 border border-slate-100 aspect-4/3 flex items-center justify-center">
+                        <img
+                          src={url}
+                          alt={`Memory photo ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      <div className="mt-2 text-center font-caveat text-base text-amber-950 font-bold tracking-wide">
+                        📸 {idx + 1} / {displayImageUrls.length}
+                      </div>
                     </div>
-                    <div className="mt-3 text-center font-caveat text-lg sm:text-xl text-amber-950 font-bold tracking-wide">
-                      📸 Memory Attached to Note
-                    </div>
-                  </div>
+                  ))}
                 </div>
               )}
 

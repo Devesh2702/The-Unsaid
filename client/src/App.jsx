@@ -82,6 +82,14 @@ export default function App() {
     loadNotes();
   }, [searchTerm, selectedCategory, sortBy]);
 
+  // Auto-refresh notes every 30 seconds so notes from other devices appear without manual reload
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadNotes();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [searchTerm, selectedCategory, sortBy]);
+
   // Handler after creating a new note
   const handleNoteDispatched = (newNote) => {
     if (newNote.isPrivate) {

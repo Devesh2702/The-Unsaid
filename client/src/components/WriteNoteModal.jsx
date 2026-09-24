@@ -100,8 +100,10 @@ export default function WriteNoteModal({ onClose, onNoteDispatched, initialRecip
   const [isPrivate, setIsPrivate] = useState(false);
   const [password, setPassword] = useState('');
 
-  // Attachments: Image & Voice Note
-  const [imageUrl, setImageUrl] = useState('');
+  // Attachments: Images (up to 5) & Voice Note
+  const [imageUrls, setImageUrls] = useState([]);
+  const IMAGE_LIMIT = 5;
+  const MAX_COMBINED_BYTES = 3.5 * 1024 * 1024; // ~3.5 MB combined base64 budget
   const [voiceUrl, setVoiceUrl] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -163,15 +165,44 @@ export default function WriteNoteModal({ onClose, onNoteDispatched, initialRecip
   };
 
   const handleImageFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (file) {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    // Reset input so same files can be re-selected after removal
+    e.target.value = '';
+
+    const remaining = IMAGE_LIMIT - imageUrls.length;
+    if (remaining <= 0) return;
+    const filesToProcess = files.slice(0, remaining);
+
+    const newUrls = [];
+    for (const file of filesToProcess) {
       try {
-        const compressedBase64 = await compressImageFile(file, 800, 0.75);
-        setImageUrl(compressedBase64);
+        const compressed = await compressImageFile(file, 800, 0.72);
+        newUrls.push(compressed);
       } catch (err) {
         console.error('Image compression error:', err);
       }
     }
+
+    setImageUrls(prev => {
+      const combined = [...prev, ...newUrls];
+      // Guard: drop images that would push combined payload over budget
+      let totalBytes = 0;
+      const safe = [];
+      for (const url of combined) {
+        totalBytes += url.length;
+        if (totalBytes > MAX_COMBINED_BYTES) break;
+        safe.push(url);
+      }
+      if (safe.length < combined.length) {
+        setErrorMsg('Some images were skipped — combined size would exceed the 3.5 MB dispatch limit.');
+      }
+      return safe;
+    });
+  };
+
+  const removeImage = (index) => {
+    setImageUrls(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleAudioFileUpload = (e) => {
@@ -230,7 +261,7 @@ export default function WriteNoteModal({ onClose, onNoteDispatched, initialRecip
         tag,
         isPrivate,
         password: isPrivate ? password.trim() : '',
-        imageUrl,
+        imageUrls,
         voiceUrl
       });
 
@@ -488,38 +519,50 @@ export default function WriteNoteModal({ onClose, onNoteDispatched, initialRecip
               </label>
 
               {/* Photo Attachment Picker */}
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <div className="text-xs font-typewriter text-slate-700 font-medium flex items-center justify-between">
                   <span className="flex items-center gap-1">
                     <ImageIcon className="w-3.5 h-3.5 text-pink-500" />
-                    <span>Attach Polaroid Photo</span>
+                    <span>Attach Polaroid Photos</span>
                   </span>
-                  {imageUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setImageUrl('')}
-                      className="text-[10px] text-rose-600 hover:underline flex items-center gap-0.5"
-                    >
-                      <Trash2 className="w-3 h-3" /> Remove Photo
-                    </button>
-                  )}
+                  <span className={`text-[10px] font-bold ${imageUrls.length >= IMAGE_LIMIT ? 'text-rose-600' : 'text-pink-500'}`}>
+                    {imageUrls.length}/{IMAGE_LIMIT}
+                  </span>
                 </div>
 
-                {!imageUrl ? (
+                {/* Thumbnail grid */}
+                {imageUrls.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {imageUrls.map((url, idx) => (
+                      <div key={idx} className="relative group border-2 border-pink-200 rounded-lg overflow-hidden bg-white p-0.5 shadow-sm">
+                        <img src={url} alt={`Attached ${idx + 1}`} className="h-16 w-16 object-cover rounded" />
+                        <button
+                          type="button"
+                          onClick={() => removeImage(idx)}
+                          className="absolute top-0.5 right-0.5 w-5 h-5 bg-rose-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                          title="Remove"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                        <div className="text-center text-[9px] font-typewriter text-pink-700 mt-0.5">#{idx + 1}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add button — hidden when limit reached */}
+                {imageUrls.length < IMAGE_LIMIT && (
                   <label className="flex items-center justify-center gap-2 px-3 py-2 bg-white border border-dashed border-pink-300 rounded-xl cursor-pointer hover:bg-pink-50/50 transition-colors text-xs font-typewriter text-pink-800">
                     <Upload className="w-4 h-4 text-pink-500" />
-                    <span>Upload Image (Auto-compressed)</span>
+                    <span>{imageUrls.length === 0 ? 'Upload Images (Auto-compressed)' : 'Add More Photos'}</span>
                     <input
                       type="file"
                       accept="image/*"
+                      multiple
                       onChange={handleImageFileUpload}
                       className="hidden"
                     />
                   </label>
-                ) : (
-                  <div className="relative inline-block border-2 border-pink-200 rounded-lg overflow-hidden bg-white p-1">
-                    <img src={imageUrl} alt="Attached preview" className="h-20 w-auto object-cover rounded max-w-full" />
-                  </div>
                 )}
               </div>
 
@@ -708,15 +751,19 @@ export default function WriteNoteModal({ onClose, onNoteDispatched, initialRecip
                 "{title || 'Untitled Note'}"
               </div>
 
-              {/* Photo preview in Polaroid style */}
-              {imageUrl && (
-                <div className="my-3 flex justify-center">
-                  <div className="bg-white p-2 border border-slate-200 shadow-md rounded transform -rotate-2 max-w-[200px]">
-                    <img src={imageUrl} alt="Polaroid Memory" className="w-full h-28 object-cover rounded-xs" />
-                    <div className="text-center font-caveat text-amber-950 text-xs mt-1 font-bold">
-                      📸 Memory Attached
+              {/* Photo previews in Polaroid strip */}
+              {imageUrls.length > 0 && (
+                <div className="my-3 flex flex-wrap justify-center gap-2">
+                  {imageUrls.map((url, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-white p-2 border border-slate-200 shadow-md rounded"
+                      style={{ transform: `rotate(${(idx % 2 === 0 ? -1 : 1) * (1 + idx * 0.5)}deg)` }}
+                    >
+                      <img src={url} alt={`Memory ${idx + 1}`} className="w-20 h-16 object-cover rounded-xs" />
+                      <div className="text-center font-caveat text-amber-950 text-[10px] mt-1 font-bold">📸 {idx + 1}</div>
                     </div>
-                  </div>
+                  ))}
                 </div>
               )}
 

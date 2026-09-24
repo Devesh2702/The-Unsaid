@@ -4,6 +4,7 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import mongoose from 'mongoose';
 import { connectDB, INITIAL_NOTES } from './db.js';
 import Note from './models/Note.js';
 
@@ -134,6 +135,7 @@ function sanitizeNote(note) {
   if (copy.isPrivate) {
     copy.content = '🔒 Private Secret Note (Password Protected)';
     copy.imageUrl = '';
+    copy.imageUrls = [];
     copy.voiceUrl = '';
     copy.encryptedData = note.encryptedData || copy.encryptedData || '';
   }
@@ -331,8 +333,14 @@ router.post('/notes', async (req, res) => {
       isPrivate,
       password,
       imageUrl,
+      imageUrls,
       voiceUrl
     } = req.body || {};
+
+    // Normalize: prefer imageUrls array, fall back to legacy imageUrl string
+    const cleanImageUrls = Array.isArray(imageUrls) && imageUrls.length
+      ? imageUrls.slice(0, 5).filter(u => typeof u === 'string' && u.length > 0)
+      : (imageUrl ? [imageUrl] : []);
 
     if (!recipient || !recipient.trim() || !content || !content.trim()) {
       return res.status(400).json({ error: 'Recipient and Content are required fields.' });
@@ -343,7 +351,7 @@ router.post('/notes', async (req, res) => {
     }
 
     const cleanPassword = isPrivate ? String(password).trim() : '';
-    const cleanEncryptedData = req.body.encryptedData || (isPrivate && cleanPassword ? encryptPayload({ content: content.trim(), imageUrl: imageUrl || '', voiceUrl: voiceUrl || '' }, cleanPassword) : '');
+    const cleanEncryptedData = req.body.encryptedData || (isPrivate && cleanPassword ? encryptPayload({ content: content.trim(), imageUrls: cleanImageUrls, voiceUrl: voiceUrl || '' }, cleanPassword) : '');
 
     const newNoteObj = {
       id: `note-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -360,7 +368,8 @@ router.post('/notes', async (req, res) => {
       isPrivate: Boolean(isPrivate),
       password: cleanPassword,
       encryptedData: cleanEncryptedData,
-      imageUrl: imageUrl || '',
+      imageUrl: cleanImageUrls[0] || '',
+      imageUrls: cleanImageUrls,
       voiceUrl: voiceUrl || '',
       reactions: { heart: 0, hug: 0, star: 0, stamp: 1 },
       createdAt: new Date(),
@@ -426,7 +435,9 @@ router.post('/notes/:id/unlock', async (req, res) => {
         const dec = decryptPayload(note.encryptedData, inputPass);
         const unlockedNote = sanitizeNote(note);
         unlockedNote.content = dec.content;
-        unlockedNote.imageUrl = dec.imageUrl || '';
+        // Support both new imageUrls array and legacy imageUrl string from old encrypted notes
+        unlockedNote.imageUrls = Array.isArray(dec.imageUrls) ? dec.imageUrls : (dec.imageUrl ? [dec.imageUrl] : []);
+        unlockedNote.imageUrl = unlockedNote.imageUrls[0] || '';
         unlockedNote.voiceUrl = dec.voiceUrl || '';
         unlockedNote.isUnlocked = true;
         return res.json(unlockedNote);

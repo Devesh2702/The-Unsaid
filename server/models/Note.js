@@ -17,6 +17,7 @@ const noteSchema = new mongoose.Schema(
     password: { type: String, default: '' },
     encryptedData: { type: String, default: '' },
     imageUrl: { type: String, default: '' },
+    imageUrls: { type: [String], default: [] },
     voiceUrl: { type: String, default: '' },
     reactions: {
       heart: { type: Number, default: 0 },
